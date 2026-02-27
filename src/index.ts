@@ -769,62 +769,60 @@ function withSecurityHeaders(response: Response, nonce?: string): Response {
 
 // ─── HTML Templates ───────────────────────────────────────────────────────
 
-const CSS_VARS = `--gold:#c9a84c;--gold-light:#e8d48b;--gold-dim:#8a7230;--parchment:#d4c5a9;--parchment-dim:#a89b80;--bg:#080808;--bg-card:#0e0d0b;--border:#2a2318;--border-light:#3d3425;--green:#5a9e3e;--red:#9e3e3e`;
+const CSS_VARS = `--gold:#f7931a;--gold-light:#fbb03b;--gold-dim:#c06b00;--parchment:#e0dcd4;--parchment-dim:#a89b80;--bg:#0d1117;--bg-card:#161b22;--border:#30363d;--border-light:#484f58;--green:#5a9e3e;--red:#9e3e3e`;
 
 function baseCSS(nonce: string): string {
   return `<style nonce="${nonce}">
 *{margin:0;padding:0;box-sizing:border-box}
 :root{${CSS_VARS}}
-body{background:var(--bg);color:var(--parchment);font-family:'Cormorant Garamond',Georgia,'Times New Roman',serif;font-size:1.05rem;line-height:1.8;overflow-x:hidden}
-body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,rgba(201,168,76,0.03) 0%,transparent 60%);pointer-events:none;z-index:0}
-main{max-width:960px;margin:0 auto;padding:3rem 2rem;position:relative;z-index:1}
+body{background:var(--bg);color:var(--parchment);font-family:'Poppins',sans-serif;font-size:0.95rem;line-height:1.7;overflow-x:hidden}
+body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,rgba(247,147,26,0.03) 0%,transparent 60%);pointer-events:none;z-index:0}
+main{max-width:960px;margin:0 auto;padding:1rem 2rem;position:relative;z-index:1}
 a{color:var(--gold);text-decoration:none;transition:color 0.3s,text-shadow 0.3s}
-a:hover{color:var(--gold-light);text-shadow:0 0 8px rgba(201,168,76,0.3)}
-h1{font-family:'Cinzel',Georgia,serif;font-size:2.6rem;font-weight:900;color:var(--gold);letter-spacing:0.15em;text-align:center;margin-bottom:0.3rem;text-shadow:0 0 40px rgba(201,168,76,0.15)}
-.subtitle{font-family:'Cinzel',Georgia,serif;font-size:0.9rem;font-weight:400;color:var(--parchment-dim);letter-spacing:0.2em;text-transform:uppercase;text-align:center;margin-bottom:2.5rem}
-.divider{text-align:center;margin:2rem 0;position:relative;height:20px}
-.divider::before{content:'';position:absolute;left:0;right:0;top:50%;height:1px;background:linear-gradient(90deg,transparent,var(--border-light) 20%,var(--gold-dim) 50%,var(--border-light) 80%,transparent)}
-.divider::after{content:'\\2726';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--bg);color:var(--gold-dim);padding:0 0.8rem;font-size:0.9rem}
+a:hover{color:var(--gold-light);text-shadow:0 0 8px rgba(247,147,26,0.3)}
+h1{font-family:'Poppins',sans-serif;font-size:1.8rem;font-weight:900;color:var(--gold);letter-spacing:0.15em;text-align:center;margin-bottom:0.15rem;text-shadow:0 0 40px rgba(247,147,26,0.15)}
+.subtitle{font-family:'Poppins',sans-serif;font-size:0.8rem;font-weight:400;color:var(--parchment-dim);letter-spacing:0.2em;text-transform:uppercase;text-align:center;margin-bottom:0.6rem}
+.divider{text-align:center;margin:0.5rem 0;position:relative;height:1px;background:linear-gradient(90deg,transparent,var(--border-light) 20%,var(--gold-dim) 50%,var(--border-light) 80%,transparent)}
 
 /* Stats bar */
-.stats-bar{display:flex;justify-content:center;gap:2.5rem;margin-bottom:2rem;flex-wrap:wrap}
+.stats-bar{display:flex;justify-content:center;gap:2rem;margin-bottom:0.5rem;flex-wrap:wrap}
 .stat{text-align:center}
-.stat-value{font-family:'Cinzel',Georgia,serif;font-size:1.8rem;font-weight:700;color:var(--gold);display:block}
-.stat-label{font-size:0.78rem;color:var(--parchment-dim);text-transform:uppercase;letter-spacing:0.1em}
+.stat-value{font-family:'Poppins',sans-serif;font-size:1.4rem;font-weight:700;color:var(--gold);display:block;line-height:1.2}
+.stat-label{font-size:0.72rem;color:var(--parchment-dim);text-transform:uppercase;letter-spacing:0.1em}
 
 /* Filter bar */
-.filters{display:flex;gap:0.8rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center}
-.filters select,.filters input{background:var(--bg-card);border:1px solid var(--border-light);color:var(--parchment);font-family:'Cormorant Garamond',Georgia,serif;font-size:0.9rem;padding:0.5rem 0.8rem;outline:none;transition:border-color 0.3s}
+.filters{display:flex;gap:0.6rem;margin-bottom:0.8rem;flex-wrap:wrap;align-items:center}
+.filters select,.filters input{background:var(--bg-card);border:1px solid var(--border-light);color:var(--parchment);font-family:'Poppins',sans-serif;font-size:0.85rem;padding:0.4rem 0.7rem;outline:none;transition:border-color 0.3s}
 .filters select:focus,.filters input:focus{border-color:var(--gold-dim)}
 .filters select{cursor:pointer;-webkit-appearance:none;appearance:none;padding-right:1.8rem;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a7230'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 0.6rem center}
 
 /* Bounty cards */
 .bounty-grid{display:grid;gap:1rem}
 .bounty-card{background:var(--bg-card);border:1px solid var(--border);padding:1.3rem 1.5rem;transition:border-color 0.4s,box-shadow 0.4s,transform 0.3s;position:relative;cursor:pointer;text-decoration:none;display:block;color:inherit}
-.bounty-card:hover{border-color:var(--gold-dim);box-shadow:0 4px 30px rgba(201,168,76,0.07);transform:translateY(-2px);color:inherit;text-shadow:none}
+.bounty-card:hover{border-color:var(--gold-dim);box-shadow:0 4px 30px rgba(247,147,26,0.07);transform:translateY(-2px);color:inherit;text-shadow:none}
 .bounty-card::after{content:'';position:absolute;bottom:0;left:10%;right:10%;height:1px;background:linear-gradient(90deg,transparent,var(--border-light),transparent);transition:background 0.4s}
 .bounty-card:hover::after{background:linear-gradient(90deg,transparent,var(--gold-dim),transparent)}
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:0.8rem;margin-bottom:0.5rem}
-.card-title{font-family:'Cinzel',Georgia,serif;font-weight:700;font-size:1rem;color:var(--gold);letter-spacing:0.04em;flex:1}
-.card-amount{font-family:'Cinzel',Georgia,serif;font-size:0.95rem;font-weight:700;color:var(--gold-light);white-space:nowrap}
+.card-title{font-family:'Poppins',sans-serif;font-weight:700;font-size:1rem;color:var(--gold);letter-spacing:0.04em;flex:1}
+.card-amount{font-family:'Poppins',sans-serif;font-size:0.95rem;font-weight:700;color:var(--gold-light);white-space:nowrap}
 .card-meta{display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin-top:0.4rem}
 .card-creator{font-size:0.82rem;color:var(--parchment-dim)}
 .card-deadline{font-size:0.78rem;color:var(--parchment-dim);font-style:italic}
 .card-tags{display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem}
-.tag{font-family:'Cinzel',Georgia,serif;font-size:0.68rem;padding:0.15rem 0.6rem;border:1px solid var(--border-light);color:var(--parchment-dim);letter-spacing:0.05em;text-transform:uppercase}
+.tag{font-family:'Poppins',sans-serif;font-size:0.68rem;padding:0.15rem 0.6rem;border:1px solid var(--border-light);color:var(--parchment-dim);letter-spacing:0.05em;text-transform:uppercase}
 
 /* Status badges */
-.badge{font-family:'Cinzel',Georgia,serif;font-size:0.68rem;font-weight:600;padding:0.2rem 0.7rem;letter-spacing:0.08em;text-transform:uppercase;border:1px solid}
+.badge{font-family:'Poppins',sans-serif;font-size:0.68rem;font-weight:600;padding:0.2rem 0.7rem;letter-spacing:0.08em;text-transform:uppercase;border:1px solid}
 .badge-open{color:var(--green);border-color:var(--green)}
-.badge-claimed{color:#c9a84c;border-color:#c9a84c}
+.badge-claimed{color:#d4a017;border-color:#d4a017}
 .badge-submitted{color:#6a9fd8;border-color:#6a9fd8}
 .badge-approved{color:#a86adb;border-color:#a86adb}
-.badge-paid{color:var(--gold-light);border-color:var(--gold-light);background:rgba(201,168,76,0.08)}
+.badge-paid{color:var(--gold-light);border-color:var(--gold-light);background:rgba(247,147,26,0.08)}
 .badge-cancelled{color:var(--red);border-color:var(--red);opacity:0.7}
 
 /* Pagination */
 .pagination{display:flex;justify-content:center;gap:0.5rem;margin-top:2rem}
-.pagination button{background:var(--bg-card);border:1px solid var(--border-light);color:var(--parchment-dim);font-family:'Cinzel',Georgia,serif;font-size:0.8rem;padding:0.4rem 1rem;cursor:pointer;letter-spacing:0.06em;transition:border-color 0.3s,color 0.3s}
+.pagination button{background:var(--bg-card);border:1px solid var(--border-light);color:var(--parchment-dim);font-family:'Poppins',sans-serif;font-size:0.8rem;padding:0.4rem 1rem;cursor:pointer;letter-spacing:0.06em;transition:border-color 0.3s,color 0.3s}
 .pagination button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
 .pagination button:disabled{opacity:0.3;cursor:default}
 .pagination .page-info{font-size:0.8rem;color:var(--parchment-dim);display:flex;align-items:center;padding:0 0.5rem}
@@ -836,11 +834,11 @@ h1{font-family:'Cinzel',Georgia,serif;font-size:2.6rem;font-weight:900;color:var
 .error-msg{text-align:center;color:var(--red);padding:2rem 0}
 
 /* Detail page */
-.back-link{display:inline-block;margin-bottom:1.5rem;font-family:'Cinzel',Georgia,serif;font-size:0.82rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--parchment-dim)}
+.back-link{display:inline-block;margin-bottom:1.5rem;font-family:'Poppins',sans-serif;font-size:0.82rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--parchment-dim)}
 .back-link:hover{color:var(--gold)}
 .detail-header{margin-bottom:1.5rem}
-.detail-title{font-family:'Cinzel',Georgia,serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:0.06em;margin-bottom:0.4rem}
-.detail-amount{font-family:'Cinzel',Georgia,serif;font-size:1.4rem;color:var(--gold-light);margin-bottom:0.6rem}
+.detail-title{font-family:'Poppins',sans-serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:0.06em;margin-bottom:0.4rem}
+.detail-amount{font-family:'Poppins',sans-serif;font-size:1.4rem;color:var(--gold-light);margin-bottom:0.6rem}
 .detail-meta{font-size:0.88rem;color:var(--parchment-dim);line-height:2}
 .detail-meta strong{color:var(--parchment)}
 .detail-desc{line-height:1.9;color:var(--parchment);white-space:pre-wrap;margin-top:0.5rem}
@@ -849,47 +847,69 @@ h1{font-family:'Cinzel',Georgia,serif;font-size:2.6rem;font-weight:900;color:var
 .timeline{display:flex;align-items:center;gap:0;margin:1.5rem 0;flex-wrap:wrap}
 .tl-step{display:flex;align-items:center;gap:0.4rem}
 .tl-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--border-light);background:var(--bg);transition:border-color 0.3s,background 0.3s,box-shadow 0.3s}
-.tl-dot.active{border-color:var(--gold);background:var(--gold);box-shadow:0 0 8px rgba(201,168,76,0.4)}
+.tl-dot.active{border-color:var(--gold);background:var(--gold);box-shadow:0 0 8px rgba(247,147,26,0.4)}
 .tl-dot.done{border-color:var(--green);background:var(--green)}
-.tl-label{font-family:'Cinzel',Georgia,serif;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--parchment-dim)}
+.tl-label{font-family:'Poppins',sans-serif;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--parchment-dim)}
 .tl-label.active{color:var(--gold)}
 .tl-label.done{color:var(--green)}
 .tl-line{width:2rem;height:1px;background:var(--border-light);margin:0 0.3rem}
 .tl-line.done{background:var(--green)}
 
 /* Section cards (claims, submissions, payments) */
-.section-title{font-family:'Cinzel',Georgia,serif;font-size:1.1rem;font-weight:700;color:var(--gold);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:1rem;padding-left:1rem;position:relative}
+.section-title{font-family:'Poppins',sans-serif;font-size:1.1rem;font-weight:700;color:var(--gold);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:1rem;padding-left:1rem;position:relative}
 .section-title::before{content:'';position:absolute;left:0;top:0.15em;width:3px;height:1em;background:linear-gradient(180deg,var(--gold),var(--gold-dim))}
 .entry-card{background:var(--bg-card);border:1px solid var(--border);padding:1rem 1.2rem;margin-bottom:0.6rem}
 .entry-card .entry-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;flex-wrap:wrap;gap:0.5rem}
-.entry-card .entry-label{font-family:'Cinzel',Georgia,serif;font-size:0.75rem;color:var(--gold-dim);letter-spacing:0.06em;text-transform:uppercase}
+.entry-card .entry-label{font-family:'Poppins',sans-serif;font-size:0.75rem;color:var(--gold-dim);letter-spacing:0.06em;text-transform:uppercase}
 .entry-card .entry-addr{font-family:'SF Mono',Monaco,Consolas,monospace;font-size:0.78rem;color:var(--parchment-dim);word-break:break-all}
 .entry-card .entry-body{font-size:0.9rem;color:var(--parchment);margin-top:0.3rem}
 .entry-card .entry-time{font-size:0.75rem;color:var(--parchment-dim);margin-top:0.3rem;font-style:italic}
 .entry-card a{word-break:break-all}
-.verified-tag{color:var(--green);font-family:'Cinzel',Georgia,serif;font-size:0.72rem;letter-spacing:0.05em}
-.failed-tag{color:var(--red);font-family:'Cinzel',Georgia,serif;font-size:0.72rem;letter-spacing:0.05em}
+.verified-tag{color:var(--green);font-family:'Poppins',sans-serif;font-size:0.72rem;letter-spacing:0.05em}
+.failed-tag{color:var(--red);font-family:'Poppins',sans-serif;font-size:0.72rem;letter-spacing:0.05em}
 
 /* Footer */
-footer{border-top:1px solid var(--border);padding-top:2rem;margin-top:2rem;text-align:center}
+footer{border-top:1px solid var(--border);padding-top:1rem;margin-top:1.5rem;text-align:center}
 footer::before{content:'';position:absolute;left:20%;right:20%;height:1px;background:linear-gradient(90deg,transparent,var(--gold-dim),transparent)}
 .footer-text{font-size:0.82rem;color:var(--parchment-dim)}
 .footer-text a{color:var(--gold)}
 
 /* Mobile */
 @media(max-width:600px){
-  main{padding:2rem 1rem}
-  h1{font-size:1.8rem;letter-spacing:0.1em}
-  .subtitle{font-size:0.75rem}
-  .stats-bar{gap:1.2rem}
-  .stat-value{font-size:1.3rem}
-  .filters{flex-direction:column}
-  .filters select,.filters input{width:100%}
-  .card-header{flex-direction:column;gap:0.3rem}
-  .detail-title{font-size:1.5rem}
-  .timeline{gap:0.2rem}
-  .tl-line{width:1rem}
-  .tl-label{font-size:0.6rem}
+  main{padding:0.6rem 0.7rem}
+  h1{font-size:1.3rem;letter-spacing:0.06em;margin-bottom:0.1rem}
+  .subtitle{font-size:0.65rem;letter-spacing:0.1em;margin-bottom:0.4rem}
+  .stats-bar{gap:0.8rem;margin-bottom:0.3rem}
+  .stat-value{font-size:1.1rem}
+  .stat-label{font-size:0.65rem}
+  .filters{flex-direction:row;gap:0.4rem}
+  .filters select,.filters input{flex:1;min-width:0;font-size:0.8rem;padding:0.4rem 0.6rem}
+  .bounty-card{padding:1rem}
+  .card-header{flex-direction:column;gap:0.2rem}
+  .card-title{font-size:0.9rem}
+  .card-amount{font-size:0.85rem}
+  .card-meta{gap:0.5rem}
+  .card-tags{gap:0.3rem}
+  .tag{font-size:0.62rem;padding:0.1rem 0.4rem}
+  .badge{font-size:0.62rem;padding:0.15rem 0.5rem}
+  .pagination button{font-size:0.75rem;padding:0.4rem 0.8rem}
+  .back-link{font-size:0.78rem}
+  .detail-header{margin-bottom:1rem}
+  .detail-title{font-size:1.3rem}
+  .detail-amount{font-size:1.1rem}
+  .detail-meta{font-size:0.82rem}
+  .detail-desc{font-size:0.88rem;line-height:1.7}
+  .timeline{flex-wrap:wrap;gap:0.15rem}
+  .tl-line{width:0.8rem}
+  .tl-label{font-size:0.55rem}
+  .tl-dot{width:10px;height:10px}
+  .section-title{font-size:0.95rem}
+  .entry-card{padding:0.8rem}
+  .entry-card .entry-addr{font-size:0.7rem}
+  .entry-card .entry-body{font-size:0.82rem}
+  .divider{margin:0.3rem 0}
+  footer{padding-top:1.2rem;margin-top:1.2rem}
+  .footer-text{font-size:0.75rem}
 }
 </style>`;
 }
@@ -908,7 +928,7 @@ function htmlHead(title: string, description: string, nonce: string): string {
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
 ${baseCSS(nonce)}
 </head>`;
 }
@@ -941,8 +961,8 @@ function renderHomePage(nonce: string): Response {
 
 <div class="filters">
 <select id="filter-status">
-<option value="all">All Statuses</option>
-<option value="open" selected>Open</option>
+<option value="all" selected>All Statuses</option>
+<option value="open">Open</option>
 <option value="claimed">Claimed</option>
 <option value="submitted">Submitted</option>
 <option value="approved">Approved</option>
@@ -991,12 +1011,17 @@ ${htmlFooter()}
     if(!iso)return'';
     var d=new Date(iso),now=Date.now(),diff=d.getTime()-now;
     if(diff>0){
+      var hrs=Math.ceil(diff/36e5);
+      if(hrs<=24)return hrs===1?'1 hour left':hrs+' hours left';
       var days=Math.ceil(diff/864e5);
       return days===1?'1 day left':days+' days left';
     }
-    var ago=Math.floor(-diff/864e5);
-    if(ago===0)return'today';
-    return ago===1?'1 day ago':ago+' days ago';
+    var ago=Math.abs(diff);
+    var hrsAgo=Math.floor(ago/36e5);
+    if(hrsAgo<1)return'just now';
+    if(hrsAgo<24)return hrsAgo===1?'1 hour ago':hrsAgo+' hours ago';
+    var daysAgo=Math.floor(ago/864e5);
+    return daysAgo===1?'1 day ago':daysAgo+' days ago';
   }
 
   function loadStats(){
@@ -1119,6 +1144,10 @@ ${htmlFooter()}
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  function linkify(s){
+    return escapeHtml(s).replace(/(https?:\\/\\/[^\\s)]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
+  }
+
   function formatSats(n){
     if(n>=1e6)return(n/1e6).toFixed(1)+'M';
     if(n>=1e3)return(n/1e3).toFixed(1)+'K';
@@ -1180,7 +1209,7 @@ ${htmlFooter()}
     html+=renderTimeline(b.status||'open');
 
     if(b.description){
-      html+='<div class="divider"></div><div class="detail-desc">'+escapeHtml(b.description)+'</div>';
+      html+='<div class="divider"></div><div class="detail-desc">'+linkify(b.description)+'</div>';
     }
 
     // Claims
@@ -1252,7 +1281,7 @@ function renderNotFound(nonce: string): Response {
 <h1 style="margin-top:4rem">404</h1>
 <p class="subtitle">Page not found</p>
 <div style="text-align:center;margin-top:2rem">
-<a href="/" style="font-family:'Cinzel',Georgia,serif;font-size:0.9rem;letter-spacing:0.08em">&larr; Return to Bounties</a>
+<a href="/" style="font-family:'Poppins',sans-serif;font-size:0.9rem;letter-spacing:0.08em">&larr; Return to Bounties</a>
 </div>
 ${htmlFooter()}
 </main>
