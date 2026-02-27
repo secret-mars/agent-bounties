@@ -777,7 +777,7 @@ function baseCSS(nonce: string): string {
 :root{${CSS_VARS}}
 body{background:var(--bg);color:var(--parchment);font-family:'Poppins',sans-serif;font-size:0.95rem;line-height:1.7;overflow-x:hidden}
 body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,rgba(247,147,26,0.03) 0%,transparent 60%);pointer-events:none;z-index:0}
-main{max-width:960px;margin:0 auto;padding:1rem 2rem;position:relative;z-index:1}
+main{max-width:1280px;margin:0 auto;padding:1rem 2rem;position:relative;z-index:1}
 a{color:var(--gold);text-decoration:none;transition:color 0.3s,text-shadow 0.3s}
 a:hover{color:var(--gold-light);text-shadow:0 0 8px rgba(247,147,26,0.3)}
 h1{font-family:'Poppins',sans-serif;font-size:1.8rem;font-weight:900;color:var(--gold);letter-spacing:0.15em;text-align:center;margin-bottom:0.15rem;text-shadow:0 0 40px rgba(247,147,26,0.15)}
@@ -797,19 +797,21 @@ h1{font-family:'Poppins',sans-serif;font-size:1.8rem;font-weight:900;color:var(-
 .filters select{cursor:pointer;-webkit-appearance:none;appearance:none;padding-right:1.8rem;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a7230'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 0.6rem center}
 
 /* Bounty cards */
-.bounty-grid{display:grid;gap:1rem}
-.bounty-card{background:var(--bg-card);border:1px solid var(--border);padding:1.3rem 1.5rem;transition:border-color 0.4s,box-shadow 0.4s,transform 0.3s;position:relative;cursor:pointer;text-decoration:none;display:block;color:inherit}
+.bounty-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
+@media(max-width:1200px){.bounty-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:900px){.bounty-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.bounty-grid{grid-template-columns:1fr}}
+.bounty-card{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:1rem 1.2rem;transition:border-color 0.4s,box-shadow 0.4s,transform 0.3s;position:relative;cursor:pointer;text-decoration:none;display:flex;flex-direction:column;color:inherit}
 .bounty-card:hover{border-color:var(--gold-dim);box-shadow:0 4px 30px rgba(247,147,26,0.07);transform:translateY(-2px);color:inherit;text-shadow:none}
 .bounty-card::after{content:'';position:absolute;bottom:0;left:10%;right:10%;height:1px;background:linear-gradient(90deg,transparent,var(--border-light),transparent);transition:background 0.4s}
 .bounty-card:hover::after{background:linear-gradient(90deg,transparent,var(--gold-dim),transparent)}
-.card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:0.8rem;margin-bottom:0.5rem}
-.card-title{font-family:'Poppins',sans-serif;font-weight:700;font-size:1rem;color:var(--gold);letter-spacing:0.04em;flex:1}
-.card-amount{font-family:'Poppins',sans-serif;font-size:0.95rem;font-weight:700;color:var(--gold-light);white-space:nowrap}
-.card-meta{display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin-top:0.4rem}
-.card-creator{font-size:0.82rem;color:var(--parchment-dim)}
-.card-deadline{font-size:0.78rem;color:var(--parchment-dim);font-style:italic}
-.card-tags{display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem}
-.tag{font-family:'Poppins',sans-serif;font-size:0.68rem;padding:0.15rem 0.6rem;border:1px solid var(--border-light);color:var(--parchment-dim);letter-spacing:0.05em;text-transform:uppercase}
+.card-amount{font-family:'Poppins',sans-serif;font-size:1.1rem;font-weight:700;color:var(--gold-light);margin-bottom:0.5rem}
+.card-title{font-family:'Poppins',sans-serif;font-weight:700;font-size:0.92rem;color:var(--gold);letter-spacing:0.04em;flex:1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4;margin-bottom:0.5rem}
+.card-meta{display:flex;gap:0.6rem;flex-wrap:wrap;align-items:center;margin-top:auto}
+.card-creator{font-size:0.75rem;color:var(--parchment-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.card-deadline{font-size:0.72rem;color:var(--parchment-dim);font-style:italic}
+.card-tags{display:flex;gap:0.3rem;flex-wrap:wrap;margin-top:0.5rem}
+.tag{font-family:'Poppins',sans-serif;font-size:0.62rem;padding:0.1rem 0.5rem;border:1px solid var(--border-light);color:var(--parchment-dim);letter-spacing:0.05em;text-transform:uppercase;border-radius:3px}
 
 /* Status badges */
 .badge{font-family:'Poppins',sans-serif;font-size:0.68rem;font-weight:600;padding:0.2rem 0.7rem;letter-spacing:0.08em;text-transform:uppercase;border:1px solid}
@@ -884,10 +886,9 @@ footer::before{content:'';position:absolute;left:20%;right:20%;height:1px;backgr
   .stat-label{font-size:0.65rem}
   .filters{flex-direction:row;gap:0.4rem}
   .filters select,.filters input{flex:1;min-width:0;font-size:0.8rem;padding:0.4rem 0.6rem}
-  .bounty-card{padding:1rem}
-  .card-header{flex-direction:column;gap:0.2rem}
-  .card-title{font-size:0.9rem}
-  .card-amount{font-size:0.85rem}
+  .bounty-card{padding:0.8rem 1rem}
+  .card-title{font-size:0.85rem}
+  .card-amount{font-size:0.95rem}
   .card-meta{gap:0.5rem}
   .card-tags{gap:0.3rem}
   .tag{font-size:0.62rem;padding:0.1rem 0.4rem}
@@ -1067,10 +1068,8 @@ ${htmlFooter()}
         }
         var deadline=b.deadline?'<span class="card-deadline">'+relativeTime(b.deadline)+'</span>':'';
         html+='<a class="bounty-card" href="/bounties/'+(b.uuid||b.id)+'">'
-          +'<div class="card-header">'
-          +'<span class="card-title"><span style="opacity:0.4;font-weight:400">#'+b.id+'</span> '+escapeHtml(b.title)+'</span>'
           +'<span class="card-amount">'+formatSats(b.amount_sats)+' sats</span>'
-          +'</div>'
+          +'<span class="card-title">'+escapeHtml(b.title)+'</span>'
           +'<div class="card-meta">'
           +'<span class="'+badgeClass(b.status)+'">'+escapeHtml(b.status)+'</span>'
           +'<span class="card-creator">'+(escapeHtml(b.creator_name)||escapeHtml(b.creator_stx))+'</span>'
