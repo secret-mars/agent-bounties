@@ -20,7 +20,8 @@ const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function resolveCorsOrigin(requestOrigin: string | null, isWrite: boolean): string | null {
   if (!isWrite) return '*';
-  if (!requestOrigin) return null;
+  // No Origin header = server-to-server (agents, curl) — allow with no CORS headers
+  if (!requestOrigin) return 'null';
   if ((WRITE_ALLOWED_ORIGINS as string[]).includes(requestOrigin)) return requestOrigin;
   if (/^https?:\/\/localhost(:\d+)?$/.test(requestOrigin)) return requestOrigin;
   if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(requestOrigin)) return requestOrigin;
@@ -254,6 +255,186 @@ async function verifyBip137(signature: string, message: string, expectedAddress:
   return null;
 }
 
+// ─── BIP-322 Signature Verification (P2WPKH / bc1q) ─────────────────────────
+
+function concatBytes(...arrays: Uint8Array[]): Uint8Array {
+  const totalLen = arrays.reduce((sum, a) => sum + a.length, 0);
+  const result = new Uint8Array(totalLen);
+  let offset = 0;
+  for (const a of arrays) { result.set(a, offset); offset += a.length; }
+  return result;
+}
+
+function writeU32LE(value: number): Uint8Array {
+  const buf = new Uint8Array(4);
+  buf[0] = value & 0xff; buf[1] = (value >> 8) & 0xff;
+  buf[2] = (value >> 16) & 0xff; buf[3] = (value >> 24) & 0xff;
+  return buf;
+}
+
+function writeU64LE(value: number): Uint8Array {
+  const buf = new Uint8Array(8);
+  buf[0] = value & 0xff; buf[1] = (value >> 8) & 0xff;
+  buf[2] = (value >> 16) & 0xff; buf[3] = (value >> 24) & 0xff;
+  return buf;
+}
+
+function encodeVarInt(n: number): Uint8Array {
+  if (n < 0xfd) return new Uint8Array([n]);
+  if (n <= 0xffff) return new Uint8Array([0xfd, n & 0xff, (n >> 8) & 0xff]);
+  return new Uint8Array([0xfe, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]);
+}
+
+function bip322TaggedHash(tag: string, message: Uint8Array): Uint8Array {
+  const tagHash = sha256(new TextEncoder().encode(tag));
+  // AIBTC MCP server uses varint(len) || msg format in the tagged hash
+  const varint = encodeVarInt(message.length);
+  return sha256(concatBytes(tagHash, tagHash, varint, message));
+}
+
+async function verifyBip322P2WPKH(signatureB64: string, message: string, expectedAddress: string): Promise<string | null> {
+  let witnessBytes: Uint8Array;
+  try {
+    witnessBytes = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
+  } catch { return 'Invalid BIP-322 signature: not valid base64'; }
+
+  if (witnessBytes.length < 3) return 'BIP-322 witness too short';
+
+  // Parse witness: num_items, then for each: length + data
+  let off = 0;
+  const numItems = witnessBytes[off++];
+  if (numItems !== 2) return `Expected 2 witness items (P2WPKH), got ${numItems}`;
+
+  const sigLen = witnessBytes[off++];
+  if (off + sigLen > witnessBytes.length) return 'BIP-322 witness truncated at signature';
+  const derSigWithHashType = witnessBytes.slice(off, off + sigLen);
+  off += sigLen;
+
+  const pubkeyLen = witnessBytes[off++];
+  if (off + pubkeyLen > witnessBytes.length) return 'BIP-322 witness truncated at pubkey';
+  const pubkey = witnessBytes.slice(off, off + pubkeyLen);
+
+  if (pubkeyLen !== 33) return `Expected 33-byte compressed pubkey, got ${pubkeyLen}`;
+
+  // Verify pubkey derives to expected bc1q address
+  const derivedAddress = pubkeyToBech32(pubkey);
+  if (derivedAddress.toLowerCase() !== expectedAddress.toLowerCase()) {
+    return `BIP-322 pubkey mismatch: derived ${derivedAddress}, expected ${expectedAddress}`;
+  }
+
+  // Strip SIGHASH_ALL byte from DER signature
+  const hashType = derSigWithHashType[derSigWithHashType.length - 1];
+  if (hashType !== 0x01) return `Unexpected sighash type: ${hashType}`;
+  const derSig = derSigWithHashType.slice(0, -1);
+
+  // Parse DER: 0x30 <len> 0x02 <rlen> <r> 0x02 <slen> <s>
+  if (derSig[0] !== 0x30) return 'Invalid DER: missing SEQUENCE';
+  let d = 2;
+  if (derSig[d] !== 0x02) return 'Invalid DER: missing INTEGER for r';
+  d++;
+  const rLen = derSig[d++];
+  const rBytes = derSig.slice(d, d + rLen); d += rLen;
+  if (derSig[d] !== 0x02) return 'Invalid DER: missing INTEGER for s';
+  d++;
+  const sLen = derSig[d++];
+  const sBytes = derSig.slice(d, d + sLen);
+
+  const rHex = Array.from(rBytes, b => b.toString(16).padStart(2, '0')).join('');
+  const sHex = Array.from(sBytes, b => b.toString(16).padStart(2, '0')).join('');
+
+  // ── Construct BIP-322 sighash ──
+
+  // Message hash (tagged)
+  const messageBytes = new TextEncoder().encode(message);
+  const messageHash = bip322TaggedHash('BIP0322-signed-message', messageBytes);
+
+  // P2WPKH scriptPubKey for the output of to_spend
+  const pubkeyHash = ripemd160(sha256(pubkey));
+  const scriptPubKey = new Uint8Array(22);
+  scriptPubKey[0] = 0x00; scriptPubKey[1] = 0x14;
+  scriptPubKey.set(pubkeyHash, 2);
+
+  // to_spend scriptSig: OP_0 OP_PUSH32(messageHash)
+  const toSpendScriptSig = new Uint8Array(34);
+  toSpendScriptSig[0] = 0x00; toSpendScriptSig[1] = 0x20;
+  toSpendScriptSig.set(messageHash, 2);
+
+  // Serialize to_spend tx (non-segwit, for txid computation)
+  const toSpend = concatBytes(
+    writeU32LE(0),                                           // version = 0
+    new Uint8Array([0x01]),                                  // 1 input
+    new Uint8Array(32),                                      // prevout txid = 0x00...
+    new Uint8Array([0xff, 0xff, 0xff, 0xff]),                // prevout vout = 0xFFFFFFFF
+    new Uint8Array([toSpendScriptSig.length]),               // scriptSig length
+    toSpendScriptSig,                                        // scriptSig
+    writeU32LE(0),                                           // sequence = 0
+    new Uint8Array([0x01]),                                  // 1 output
+    writeU64LE(0),                                           // value = 0
+    new Uint8Array([scriptPubKey.length]),                    // scriptPubKey length
+    scriptPubKey,                                             // scriptPubKey
+    writeU32LE(0)                                            // locktime = 0
+  );
+
+  const toSpendTxid = sha256(sha256(toSpend));
+
+  // BIP-143 sighash for to_sign
+  const outpoint = new Uint8Array(36);
+  outpoint.set(toSpendTxid, 0); // vout = 0 (already zeroed)
+
+  const hashPrevouts = sha256(sha256(outpoint));
+  const hashSequence = sha256(sha256(writeU32LE(0)));
+
+  // Output: value=0, scriptPubKey=OP_RETURN (0x6a)
+  const outputSerialized = concatBytes(writeU64LE(0), new Uint8Array([0x01, 0x6a]));
+  const hashOutputs = sha256(sha256(outputSerialized));
+
+  // scriptCode for P2WPKH: OP_DUP OP_HASH160 <20> OP_EQUALVERIFY OP_CHECKSIG
+  const scriptCode = new Uint8Array(25);
+  scriptCode[0] = 0x76; scriptCode[1] = 0xa9; scriptCode[2] = 0x14;
+  scriptCode.set(pubkeyHash, 3);
+  scriptCode[23] = 0x88; scriptCode[24] = 0xac;
+
+  const preimage = concatBytes(
+    writeU32LE(0),                     // version = 0
+    hashPrevouts,
+    hashSequence,
+    outpoint,                          // 36 bytes
+    new Uint8Array([scriptCode.length]),
+    scriptCode,
+    writeU64LE(0),                     // value = 0
+    writeU32LE(0),                     // sequence = 0
+    hashOutputs,
+    writeU32LE(0),                     // locktime = 0
+    writeU32LE(0x01)                   // SIGHASH_ALL
+  );
+
+  const sighash = sha256(sha256(preimage));
+
+  // Verify ECDSA
+  const sig = new secp.Signature(BigInt('0x' + rHex), BigInt('0x' + sHex));
+  const valid = secp.verify(sig, sighash, pubkey);
+  if (!valid) {
+    return 'BIP-322 ECDSA verification failed';
+  }
+
+  return null; // verified
+}
+
+// ─── Unified Signature Verification ──────────────────────────────────────────
+
+async function verifySignature(signatureB64: string, message: string, expectedAddress: string): Promise<string | null> {
+  let sigBytes: Uint8Array;
+  try {
+    sigBytes = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
+  } catch { return 'Invalid signature: not valid base64'; }
+
+  if (sigBytes.length === 65) {
+    return verifyBip137(signatureB64, message, expectedAddress);
+  }
+  // BIP-322 witness (variable length, starts with item count)
+  return verifyBip322P2WPKH(signatureB64, message, expectedAddress);
+}
+
 // ─── Signature Replay Protection ─────────────────────────────────────────────
 
 async function sha256Hex(input: string): Promise<string> {
@@ -368,20 +549,26 @@ async function verifyAibtcAgent(db: D1Database, stxAddress: string): Promise<Aib
 
   // Call AIBTC API
   try {
-    const resp = await fetch(`https://aibtc.com/api/agent/profile/${stxAddress}`);
+    const resp = await fetch(`https://aibtc.com/api/verify/${stxAddress}`);
     if (!resp.ok) return null;
 
     const data = await resp.json() as {
-      stxAddress?: string;
-      btcAddress?: string;
-      displayName?: string;
-      bnsName?: string;
+      registered?: boolean;
       level?: number;
+      agent?: {
+        stxAddress?: string;
+        btcAddress?: string;
+        displayName?: string;
+        bnsName?: string;
+      };
     };
 
+    if (!data.registered) return null;
+
     const level = data.level ?? 0;
-    const display_name = data.displayName || data.bnsName || null;
-    const btc_address = data.btcAddress || null;
+    const agent = data.agent;
+    const display_name = agent?.displayName || agent?.bnsName || null;
+    const btc_address = agent?.btcAddress || null;
 
     // Cache the result
     await db
@@ -523,11 +710,11 @@ async function validateAuth(
   if (!body.btc_address) return { error: 'Required: btc_address' };
   if (!isValidBtcAddress(body.btc_address)) return { error: 'Invalid btc_address' };
   if (body.stx_address && !isValidStxAddress(body.stx_address)) return { error: 'Invalid stx_address' };
-  if (!body.signature) return { error: 'Required: signature (BIP-137)' };
+  if (!body.signature) return { error: 'Required: signature (BIP-137 or BIP-322)' };
   if (!body.timestamp) return { error: 'Required: timestamp (ISO 8601)' };
 
-  if (typeof body.signature !== 'string' || body.signature.length < 80 || body.signature.length > 100) {
-    return { error: 'Invalid signature format (expected base64 BIP-137, ~88 chars)' };
+  if (typeof body.signature !== 'string' || body.signature.length < 10 || body.signature.length > 500) {
+    return { error: 'Invalid signature format' };
   }
 
   const ts = new Date(body.timestamp).getTime();
@@ -536,7 +723,7 @@ async function validateAuth(
   if (drift > 300_000) return { error: 'Timestamp expired (must be within 300 seconds)' };
 
   const expectedMessage = `agent-bounties | ${action} | ${body.btc_address} | ${resource} | ${body.timestamp}`;
-  const sigErr = await verifyBip137(body.signature, expectedMessage, body.btc_address);
+  const sigErr = await verifySignature(body.signature, expectedMessage, body.btc_address);
   if (sigErr) return { error: sigErr };
 
   // Replay protection
