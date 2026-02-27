@@ -841,7 +841,8 @@ h1{font-family:'Poppins',sans-serif;font-size:1.8rem;font-weight:900;color:var(-
 .back-link:hover{color:var(--gold)}
 .detail-header{margin-bottom:1.5rem}
 .detail-title{font-family:'Poppins',sans-serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:0.06em;margin-bottom:0.4rem}
-.detail-amount{font-family:'Poppins',sans-serif;font-size:1.4rem;color:var(--gold-light);margin-bottom:0.6rem}
+.detail-amount{font-family:'Poppins',sans-serif;font-size:1.4rem;color:var(--gold-light);margin-bottom:0.6rem;display:flex;align-items:center;gap:0.4rem}
+.detail-amount .btc-icon{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--gold);color:#000;font-size:14px;font-weight:800;flex-shrink:0}
 .detail-meta{font-size:0.88rem;color:var(--parchment-dim);line-height:2}
 .detail-meta strong{color:var(--parchment)}
 .detail-desc{line-height:1.9;color:var(--parchment);white-space:pre-wrap;margin-top:0.5rem}
@@ -1196,7 +1197,7 @@ ${htmlFooter()}
 
     var html='<div class="detail-header">'
       +'<div class="detail-title"><span style="opacity:0.5;font-size:0.65em;font-weight:400">#'+b.id+'</span> '+escapeHtml(b.title)+'</div>'
-      +'<div class="detail-amount">'+formatSats(b.amount_sats)+' sats sBTC</div>'
+      +'<div class="detail-amount"><span class="btc-icon">\u20BF</span>'+formatSats(b.amount_sats)+' sats</div>'
       +'<div class="detail-meta">'
       +'<strong>Creator:</strong> '+(escapeHtml(b.creator_name)||escapeHtml(b.creator_stx))+'<br>'
       +(b.deadline?'<strong>Deadline:</strong> '+formatDate(b.deadline)+'<br>':'')
@@ -1848,15 +1849,17 @@ async function handlePay(id: string, body: any, db: D1Database, corsOrigin: stri
     .first<any>();
   if (!submission) return json({ error: 'No approved submission found' }, 404, corsOrigin);
 
-  if (!submission.claimer_stx) {
-    return json({ error: 'Claimer has no STX address — cannot verify sBTC payment' }, 400, corsOrigin);
+  // Use claimer's STX from claim, or allow creator to provide it via to_stx
+  const claimerStx = submission.claimer_stx || body.to_stx;
+  if (!claimerStx) {
+    return json({ error: 'Claimer has no STX address — provide to_stx in request body' }, 400, corsOrigin);
   }
 
   // Verify on-chain payment
   const verification = await verifyPayment(
     body.tx_hash,
     bounty.creator_stx,
-    submission.claimer_stx,
+    claimerStx,
     bounty.amount_sats
   );
 
@@ -1872,7 +1875,7 @@ async function handlePay(id: string, body: any, db: D1Database, corsOrigin: stri
       bountyId,
       submission.id,
       bounty.creator_stx,
-      submission.claimer_stx,
+      claimerStx,
       verification.amount_sats ?? bounty.amount_sats,
       normalizedHash,
       verification.verified ? 'confirmed' : 'pending',
@@ -1894,7 +1897,7 @@ async function handlePay(id: string, body: any, db: D1Database, corsOrigin: stri
     );
     await dbRun(db
       .prepare("UPDATE agents SET bounties_completed = bounties_completed + 1, total_earned_sats = total_earned_sats + ?, updated_at = datetime('now') WHERE stx_address = ?")
-      .bind(bounty.amount_sats, submission.claimer_stx)
+      .bind(bounty.amount_sats, claimerStx)
     );
 
     return json({
