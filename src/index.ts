@@ -805,8 +805,9 @@ h1{font-family:'Poppins',sans-serif;font-size:1.8rem;font-weight:900;color:var(-
 .bounty-card:hover{border-color:var(--gold-dim);box-shadow:0 4px 30px rgba(247,147,26,0.07);transform:translateY(-2px);color:inherit;text-shadow:none}
 .bounty-card::after{content:'';position:absolute;bottom:0;left:10%;right:10%;height:1px;background:linear-gradient(90deg,transparent,var(--border-light),transparent);transition:background 0.4s}
 .bounty-card:hover::after{background:linear-gradient(90deg,transparent,var(--gold-dim),transparent)}
-.card-amount{font-family:'Poppins',sans-serif;font-size:1.1rem;font-weight:700;color:var(--gold-light);margin-bottom:0.5rem}
-.card-title{font-family:'Poppins',sans-serif;font-weight:700;font-size:0.92rem;color:var(--gold);letter-spacing:0.04em;flex:1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4;margin-bottom:0.5rem}
+.card-title{font-family:'Poppins',sans-serif;font-weight:700;font-size:0.92rem;color:var(--gold);letter-spacing:0.04em;flex:1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4;margin-bottom:0.4rem}
+.card-amount{font-family:'Poppins',sans-serif;font-size:0.95rem;font-weight:600;color:var(--gold-light);margin-bottom:0.5rem;display:flex;align-items:center;gap:0.35rem}
+.card-amount .btc-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--gold);color:#000;font-size:11px;font-weight:800;flex-shrink:0}
 .card-meta{display:flex;gap:0.6rem;flex-wrap:wrap;align-items:center;margin-top:auto}
 .card-creator{font-size:0.75rem;color:var(--parchment-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .card-deadline{font-size:0.72rem;color:var(--parchment-dim);font-style:italic}
@@ -888,7 +889,7 @@ footer::before{content:'';position:absolute;left:20%;right:20%;height:1px;backgr
   .filters select,.filters input{flex:1;min-width:0;font-size:0.8rem;padding:0.4rem 0.6rem}
   .bounty-card{padding:0.8rem 1rem}
   .card-title{font-size:0.85rem}
-  .card-amount{font-size:0.95rem}
+  .card-amount{font-size:0.85rem}
   .card-meta{gap:0.5rem}
   .card-tags{gap:0.3rem}
   .tag{font-size:0.62rem;padding:0.1rem 0.4rem}
@@ -996,8 +997,8 @@ ${htmlFooter()}
   var PAGE_SIZE=20,currentOffset=0,totalCount=0;
 
   function formatSats(n){
-    if(n>=1e6)return(n/1e6).toFixed(1)+'M';
-    if(n>=1e3)return(n/1e3).toFixed(1)+'K';
+    if(n>=1e6){var v=(n/1e6).toFixed(1);return v.replace(/\.0$/,'')+'M'}
+    if(n>=1e3){var v=(n/1e3).toFixed(1);return v.replace(/\.0$/,'')+'K'}
     return String(n);
   }
 
@@ -1068,8 +1069,8 @@ ${htmlFooter()}
         }
         var deadline=b.deadline?'<span class="card-deadline">'+relativeTime(b.deadline)+'</span>':'';
         html+='<a class="bounty-card" href="/bounties/'+(b.uuid||b.id)+'">'
-          +'<span class="card-amount">'+formatSats(b.amount_sats)+' sats</span>'
           +'<span class="card-title">'+escapeHtml(b.title)+'</span>'
+          +'<span class="card-amount"><span class="btc-icon">\u20BF</span>'+formatSats(b.amount_sats)+' sats</span>'
           +'<div class="card-meta">'
           +'<span class="'+badgeClass(b.status)+'">'+escapeHtml(b.status)+'</span>'
           +'<span class="card-creator">'+(escapeHtml(b.creator_name)||escapeHtml(b.creator_stx))+'</span>'
@@ -1148,8 +1149,8 @@ ${htmlFooter()}
   }
 
   function formatSats(n){
-    if(n>=1e6)return(n/1e6).toFixed(1)+'M';
-    if(n>=1e3)return(n/1e3).toFixed(1)+'K';
+    if(n>=1e6){var v=(n/1e6).toFixed(1);return v.replace(/\.0$/,'')+'M'}
+    if(n>=1e3){var v=(n/1e3).toFixed(1);return v.replace(/\.0$/,'')+'K'}
     return String(n);
   }
 
