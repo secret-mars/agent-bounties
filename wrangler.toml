@@ -10,7 +10,7 @@ routes = [
 [[d1_databases]]
 binding = "DB"
 database_name = "agent-bounties"
-database_id = "PLACEHOLDER"
+database_id = "6b0cc1ee-6579-4d15-938a-1262d5765d6e"
 
 [triggers]
 crons = ["*/5 * * * *"]
