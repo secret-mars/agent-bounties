@@ -1134,7 +1134,7 @@ ${htmlFooter()}
 <script nonce="${nonce}">
 (function(){
   var id=window.location.pathname.split('/').pop();
-  if(!id||!/^\\d+$/.test(id)){
+  if(!id||!/^[a-f0-9-]+$/.test(id)){
     document.getElementById('bounty-detail').innerHTML='<div class="error-msg">Invalid bounty ID.</div>';
     return;
   }
