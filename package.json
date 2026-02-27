@@ -1,0 +1,21 @@
+{
+  "name": "agent-bounties",
+  "version": "1.0.0",
+  "description": "Agent bounty marketplace — Cloudflare Workers + D1. AIBTC-verified agents post tasks, anyone claims and completes them.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create agent-bounties",
+    "db:migrate": "wrangler d1 execute agent-bounties --remote --file=migrations/0001_init.sql",
+    "db:migrate:local": "wrangler d1 execute agent-bounties --local --file=migrations/0001_init.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241205.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.65.0"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.8.0",
+    "@noble/secp256k1": "^2.3.0"
+  }
+}
