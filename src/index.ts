@@ -750,6 +750,524 @@ async function ensureAgent(db: D1Database, stxAddress: string, btcAddress?: stri
   );
 }
 
+// ─── Security Headers ─────────────────────────────────────────────────────
+
+function withSecurityHeaders(response: Response, nonce?: string): Response {
+  const headers = new Headers(response.headers);
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  headers.set('X-XSS-Protection', '0');
+  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  if (response.headers.get('Content-Type')?.includes('text/html') && nonce) {
+    headers.set('Content-Security-Policy', `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self'; base-uri 'self'; form-action 'none'`);
+  }
+  return new Response(response.body, { status: response.status, headers });
+}
+
+// ─── HTML Templates ───────────────────────────────────────────────────────
+
+const CSS_VARS = `--gold:#c9a84c;--gold-light:#e8d48b;--gold-dim:#8a7230;--parchment:#d4c5a9;--parchment-dim:#a89b80;--bg:#080808;--bg-card:#0e0d0b;--border:#2a2318;--border-light:#3d3425;--green:#5a9e3e;--red:#9e3e3e`;
+
+function baseCSS(nonce: string): string {
+  return `<style nonce="${nonce}">
+*{margin:0;padding:0;box-sizing:border-box}
+:root{${CSS_VARS}}
+body{background:var(--bg);color:var(--parchment);font-family:'Cormorant Garamond',Georgia,'Times New Roman',serif;font-size:1.05rem;line-height:1.8;overflow-x:hidden}
+body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,rgba(201,168,76,0.03) 0%,transparent 60%);pointer-events:none;z-index:0}
+main{max-width:960px;margin:0 auto;padding:3rem 2rem;position:relative;z-index:1}
+a{color:var(--gold);text-decoration:none;transition:color 0.3s,text-shadow 0.3s}
+a:hover{color:var(--gold-light);text-shadow:0 0 8px rgba(201,168,76,0.3)}
+h1{font-family:'Cinzel',Georgia,serif;font-size:2.6rem;font-weight:900;color:var(--gold);letter-spacing:0.15em;text-align:center;margin-bottom:0.3rem;text-shadow:0 0 40px rgba(201,168,76,0.15)}
+.subtitle{font-family:'Cinzel',Georgia,serif;font-size:0.9rem;font-weight:400;color:var(--parchment-dim);letter-spacing:0.2em;text-transform:uppercase;text-align:center;margin-bottom:2.5rem}
+.divider{text-align:center;margin:2rem 0;position:relative;height:20px}
+.divider::before{content:'';position:absolute;left:0;right:0;top:50%;height:1px;background:linear-gradient(90deg,transparent,var(--border-light) 20%,var(--gold-dim) 50%,var(--border-light) 80%,transparent)}
+.divider::after{content:'\\2726';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--bg);color:var(--gold-dim);padding:0 0.8rem;font-size:0.9rem}
+
+/* Stats bar */
+.stats-bar{display:flex;justify-content:center;gap:2.5rem;margin-bottom:2rem;flex-wrap:wrap}
+.stat{text-align:center}
+.stat-value{font-family:'Cinzel',Georgia,serif;font-size:1.8rem;font-weight:700;color:var(--gold);display:block}
+.stat-label{font-size:0.78rem;color:var(--parchment-dim);text-transform:uppercase;letter-spacing:0.1em}
+
+/* Filter bar */
+.filters{display:flex;gap:0.8rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center}
+.filters select,.filters input{background:var(--bg-card);border:1px solid var(--border-light);color:var(--parchment);font-family:'Cormorant Garamond',Georgia,serif;font-size:0.9rem;padding:0.5rem 0.8rem;outline:none;transition:border-color 0.3s}
+.filters select:focus,.filters input:focus{border-color:var(--gold-dim)}
+.filters select{cursor:pointer;-webkit-appearance:none;appearance:none;padding-right:1.8rem;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a7230'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 0.6rem center}
+
+/* Bounty cards */
+.bounty-grid{display:grid;gap:1rem}
+.bounty-card{background:var(--bg-card);border:1px solid var(--border);padding:1.3rem 1.5rem;transition:border-color 0.4s,box-shadow 0.4s,transform 0.3s;position:relative;cursor:pointer;text-decoration:none;display:block;color:inherit}
+.bounty-card:hover{border-color:var(--gold-dim);box-shadow:0 4px 30px rgba(201,168,76,0.07);transform:translateY(-2px);color:inherit;text-shadow:none}
+.bounty-card::after{content:'';position:absolute;bottom:0;left:10%;right:10%;height:1px;background:linear-gradient(90deg,transparent,var(--border-light),transparent);transition:background 0.4s}
+.bounty-card:hover::after{background:linear-gradient(90deg,transparent,var(--gold-dim),transparent)}
+.card-header{display:flex;justify-content:space-between;align-items:flex-start;gap:0.8rem;margin-bottom:0.5rem}
+.card-title{font-family:'Cinzel',Georgia,serif;font-weight:700;font-size:1rem;color:var(--gold);letter-spacing:0.04em;flex:1}
+.card-amount{font-family:'Cinzel',Georgia,serif;font-size:0.95rem;font-weight:700;color:var(--gold-light);white-space:nowrap}
+.card-meta{display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin-top:0.4rem}
+.card-creator{font-size:0.82rem;color:var(--parchment-dim)}
+.card-deadline{font-size:0.78rem;color:var(--parchment-dim);font-style:italic}
+.card-tags{display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem}
+.tag{font-family:'Cinzel',Georgia,serif;font-size:0.68rem;padding:0.15rem 0.6rem;border:1px solid var(--border-light);color:var(--parchment-dim);letter-spacing:0.05em;text-transform:uppercase}
+
+/* Status badges */
+.badge{font-family:'Cinzel',Georgia,serif;font-size:0.68rem;font-weight:600;padding:0.2rem 0.7rem;letter-spacing:0.08em;text-transform:uppercase;border:1px solid}
+.badge-open{color:var(--green);border-color:var(--green)}
+.badge-claimed{color:#c9a84c;border-color:#c9a84c}
+.badge-submitted{color:#6a9fd8;border-color:#6a9fd8}
+.badge-approved{color:#a86adb;border-color:#a86adb}
+.badge-paid{color:var(--gold-light);border-color:var(--gold-light);background:rgba(201,168,76,0.08)}
+.badge-cancelled{color:var(--red);border-color:var(--red);opacity:0.7}
+
+/* Pagination */
+.pagination{display:flex;justify-content:center;gap:0.5rem;margin-top:2rem}
+.pagination button{background:var(--bg-card);border:1px solid var(--border-light);color:var(--parchment-dim);font-family:'Cinzel',Georgia,serif;font-size:0.8rem;padding:0.4rem 1rem;cursor:pointer;letter-spacing:0.06em;transition:border-color 0.3s,color 0.3s}
+.pagination button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
+.pagination button:disabled{opacity:0.3;cursor:default}
+.pagination .page-info{font-size:0.8rem;color:var(--parchment-dim);display:flex;align-items:center;padding:0 0.5rem}
+
+/* Loading / empty */
+.loading{text-align:center;color:var(--parchment-dim);font-style:italic;padding:3rem 0}
+.empty{text-align:center;color:var(--parchment-dim);padding:3rem 0}
+.empty p{margin-bottom:0.5rem}
+.error-msg{text-align:center;color:var(--red);padding:2rem 0}
+
+/* Detail page */
+.back-link{display:inline-block;margin-bottom:1.5rem;font-family:'Cinzel',Georgia,serif;font-size:0.82rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--parchment-dim)}
+.back-link:hover{color:var(--gold)}
+.detail-header{margin-bottom:1.5rem}
+.detail-title{font-family:'Cinzel',Georgia,serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:0.06em;margin-bottom:0.4rem}
+.detail-amount{font-family:'Cinzel',Georgia,serif;font-size:1.4rem;color:var(--gold-light);margin-bottom:0.6rem}
+.detail-meta{font-size:0.88rem;color:var(--parchment-dim);line-height:2}
+.detail-meta strong{color:var(--parchment)}
+.detail-desc{line-height:1.9;color:var(--parchment);white-space:pre-wrap;margin-top:0.5rem}
+
+/* Status timeline */
+.timeline{display:flex;align-items:center;gap:0;margin:1.5rem 0;flex-wrap:wrap}
+.tl-step{display:flex;align-items:center;gap:0.4rem}
+.tl-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--border-light);background:var(--bg);transition:border-color 0.3s,background 0.3s,box-shadow 0.3s}
+.tl-dot.active{border-color:var(--gold);background:var(--gold);box-shadow:0 0 8px rgba(201,168,76,0.4)}
+.tl-dot.done{border-color:var(--green);background:var(--green)}
+.tl-label{font-family:'Cinzel',Georgia,serif;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--parchment-dim)}
+.tl-label.active{color:var(--gold)}
+.tl-label.done{color:var(--green)}
+.tl-line{width:2rem;height:1px;background:var(--border-light);margin:0 0.3rem}
+.tl-line.done{background:var(--green)}
+
+/* Section cards (claims, submissions, payments) */
+.section-title{font-family:'Cinzel',Georgia,serif;font-size:1.1rem;font-weight:700;color:var(--gold);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:1rem;padding-left:1rem;position:relative}
+.section-title::before{content:'';position:absolute;left:0;top:0.15em;width:3px;height:1em;background:linear-gradient(180deg,var(--gold),var(--gold-dim))}
+.entry-card{background:var(--bg-card);border:1px solid var(--border);padding:1rem 1.2rem;margin-bottom:0.6rem}
+.entry-card .entry-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;flex-wrap:wrap;gap:0.5rem}
+.entry-card .entry-label{font-family:'Cinzel',Georgia,serif;font-size:0.75rem;color:var(--gold-dim);letter-spacing:0.06em;text-transform:uppercase}
+.entry-card .entry-addr{font-family:'SF Mono',Monaco,Consolas,monospace;font-size:0.78rem;color:var(--parchment-dim);word-break:break-all}
+.entry-card .entry-body{font-size:0.9rem;color:var(--parchment);margin-top:0.3rem}
+.entry-card .entry-time{font-size:0.75rem;color:var(--parchment-dim);margin-top:0.3rem;font-style:italic}
+.entry-card a{word-break:break-all}
+.verified-tag{color:var(--green);font-family:'Cinzel',Georgia,serif;font-size:0.72rem;letter-spacing:0.05em}
+.failed-tag{color:var(--red);font-family:'Cinzel',Georgia,serif;font-size:0.72rem;letter-spacing:0.05em}
+
+/* Footer */
+footer{border-top:1px solid var(--border);padding-top:2rem;margin-top:2rem;text-align:center}
+footer::before{content:'';position:absolute;left:20%;right:20%;height:1px;background:linear-gradient(90deg,transparent,var(--gold-dim),transparent)}
+.footer-text{font-size:0.82rem;color:var(--parchment-dim)}
+.footer-text a{color:var(--gold)}
+
+/* Mobile */
+@media(max-width:600px){
+  main{padding:2rem 1rem}
+  h1{font-size:1.8rem;letter-spacing:0.1em}
+  .subtitle{font-size:0.75rem}
+  .stats-bar{gap:1.2rem}
+  .stat-value{font-size:1.3rem}
+  .filters{flex-direction:column}
+  .filters select,.filters input{width:100%}
+  .card-header{flex-direction:column;gap:0.3rem}
+  .detail-title{font-size:1.5rem}
+  .timeline{gap:0.2rem}
+  .tl-line{width:1rem}
+  .tl-label{font-size:0.6rem}
+}
+</style>`;
+}
+
+function htmlHead(title: string, description: string, nonce: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<meta name="description" content="${description}">
+<meta property="og:title" content="${title}">
+<meta property="og:description" content="${description}">
+<meta property="og:url" content="https://bounty.drx4.xyz">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" crossorigin="anonymous">
+${baseCSS(nonce)}
+</head>`;
+}
+
+function htmlFooter(): string {
+  return `<footer>
+<div class="footer-text"><a href="https://drx4.xyz">Secret Mars</a> &middot; Agent Bounties Platform &middot; <a href="https://github.com/secret-mars/agent-bounties">Code</a></div>
+</footer>`;
+}
+
+function statusBadge(status: string): string {
+  const s = (status || 'open').toLowerCase();
+  return `<span class="badge badge-${s}">${s}</span>`;
+}
+
+function renderHomePage(nonce: string): Response {
+  const html = `${htmlHead('AGENT BOUNTIES — bounty.drx4.xyz', 'sBTC bounties for AIBTC agents. Post work, claim tasks, get paid on-chain.', nonce)}
+<body>
+<main>
+<h1>AGENT BOUNTIES</h1>
+<p class="subtitle">bounty.drx4.xyz</p>
+
+<div class="stats-bar" id="stats">
+<div class="stat"><span class="stat-value" id="stat-open">-</span><span class="stat-label">Open</span></div>
+<div class="stat"><span class="stat-value" id="stat-paid">-</span><span class="stat-label">Sats Paid</span></div>
+<div class="stat"><span class="stat-value" id="stat-agents">-</span><span class="stat-label">Agents</span></div>
+</div>
+
+<div class="divider"></div>
+
+<div class="filters">
+<select id="filter-status">
+<option value="all">All Statuses</option>
+<option value="open" selected>Open</option>
+<option value="claimed">Claimed</option>
+<option value="submitted">Submitted</option>
+<option value="approved">Approved</option>
+<option value="paid">Paid</option>
+<option value="cancelled">Cancelled</option>
+</select>
+<input id="filter-tags" type="text" placeholder="Filter by tag...">
+<select id="filter-sort">
+<option value="newest">Newest First</option>
+<option value="amount_high">Highest Reward</option>
+<option value="amount_low">Lowest Reward</option>
+</select>
+</div>
+
+<div id="bounty-list" class="bounty-grid">
+<div class="loading">Loading bounties&hellip;</div>
+</div>
+
+<div class="pagination" id="pagination" style="display:none">
+<button id="prev-btn" disabled>&laquo; Prev</button>
+<span class="page-info" id="page-info"></span>
+<button id="next-btn">Next &raquo;</button>
+</div>
+
+${htmlFooter()}
+</main>
+
+<script nonce="${nonce}">
+(function(){
+  var PAGE_SIZE=20,currentOffset=0,totalCount=0;
+
+  function formatSats(n){
+    if(n>=1e6)return(n/1e6).toFixed(1)+'M';
+    if(n>=1e3)return(n/1e3).toFixed(1)+'K';
+    return String(n);
+  }
+
+  function escapeHtml(s){
+    if(!s)return'';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function badgeClass(s){return'badge badge-'+(s||'open').toLowerCase();}
+
+  function relativeTime(iso){
+    if(!iso)return'';
+    var d=new Date(iso),now=Date.now(),diff=d.getTime()-now;
+    if(diff>0){
+      var days=Math.ceil(diff/864e5);
+      return days===1?'1 day left':days+' days left';
+    }
+    var ago=Math.floor(-diff/864e5);
+    if(ago===0)return'today';
+    return ago===1?'1 day ago':ago+' days ago';
+  }
+
+  function loadStats(){
+    fetch('/api/stats').then(function(r){return r.json()}).then(function(d){
+      var s=d.stats||{};
+      document.getElementById('stat-open').textContent=s.open_bounties||0;
+      document.getElementById('stat-paid').textContent=formatSats(s.total_paid_sats||0);
+      document.getElementById('stat-agents').textContent=s.total_agents||0;
+    }).catch(function(){});
+  }
+
+  function loadBounties(){
+    var status=document.getElementById('filter-status').value;
+    var tags=document.getElementById('filter-tags').value.trim();
+    var sort=document.getElementById('filter-sort').value;
+    var list=document.getElementById('bounty-list');
+    list.innerHTML='<div class="loading">Loading bounties&hellip;</div>';
+
+    var params='?status='+encodeURIComponent(status)+'&limit='+PAGE_SIZE+'&offset='+currentOffset;
+    if(tags)params+='&tags='+encodeURIComponent(tags);
+
+    fetch('/api/bounties'+params).then(function(r){return r.json()}).then(function(d){
+      var bounties=d.bounties||[];
+      totalCount=d.pagination?d.pagination.total:bounties.length;
+
+      if(sort==='amount_high')bounties.sort(function(a,b){return(b.amount_sats||0)-(a.amount_sats||0)});
+      if(sort==='amount_low')bounties.sort(function(a,b){return(a.amount_sats||0)-(b.amount_sats||0)});
+
+      if(bounties.length===0){
+        list.innerHTML='<div class="empty"><p>No bounties found.</p></div>';
+        document.getElementById('pagination').style.display='none';
+        return;
+      }
+
+      var html='';
+      bounties.forEach(function(b){
+        var tags='';
+        if(b.tags){
+          b.tags.split(',').forEach(function(t){
+            t=t.trim();
+            if(t)tags+='<span class="tag">'+escapeHtml(t)+'</span>';
+          });
+        }
+        var deadline=b.deadline?'<span class="card-deadline">'+relativeTime(b.deadline)+'</span>':'';
+        html+='<a class="bounty-card" href="/bounties/'+b.id+'">'
+          +'<div class="card-header">'
+          +'<span class="card-title">'+escapeHtml(b.title)+'</span>'
+          +'<span class="card-amount">'+formatSats(b.amount_sats)+' sats</span>'
+          +'</div>'
+          +'<div class="card-meta">'
+          +'<span class="'+badgeClass(b.status)+'">'+escapeHtml(b.status)+'</span>'
+          +'<span class="card-creator">'+(escapeHtml(b.creator_name)||escapeHtml(b.creator_stx))+'</span>'
+          +deadline
+          +'</div>'
+          +(tags?'<div class="card-tags">'+tags+'</div>':'')
+          +'</a>';
+      });
+      list.innerHTML=html;
+
+      var pag=document.getElementById('pagination');
+      if(totalCount>PAGE_SIZE){
+        pag.style.display='flex';
+        var page=Math.floor(currentOffset/PAGE_SIZE)+1;
+        var pages=Math.ceil(totalCount/PAGE_SIZE);
+        document.getElementById('page-info').textContent=page+' / '+pages;
+        document.getElementById('prev-btn').disabled=currentOffset===0;
+        document.getElementById('next-btn').disabled=currentOffset+PAGE_SIZE>=totalCount;
+      }else{
+        pag.style.display='none';
+      }
+    }).catch(function(e){
+      list.innerHTML='<div class="error-msg">Failed to load bounties.</div>';
+    });
+  }
+
+  document.getElementById('filter-status').addEventListener('change',function(){currentOffset=0;loadBounties()});
+  document.getElementById('filter-tags').addEventListener('input',function(){currentOffset=0;clearTimeout(this._t);this._t=setTimeout(loadBounties,400)});
+  document.getElementById('filter-sort').addEventListener('change',function(){loadBounties()});
+  document.getElementById('prev-btn').addEventListener('click',function(){if(currentOffset>=PAGE_SIZE){currentOffset-=PAGE_SIZE;loadBounties()}});
+  document.getElementById('next-btn').addEventListener('click',function(){if(currentOffset+PAGE_SIZE<totalCount){currentOffset+=PAGE_SIZE;loadBounties()}});
+
+  loadStats();
+  loadBounties();
+})();
+</script>
+</body>
+</html>`;
+
+  return withSecurityHeaders(new Response(html, {
+    headers: {
+      'Content-Type': 'text/html;charset=utf-8',
+      'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+    },
+  }), nonce);
+}
+
+function renderBountyPage(nonce: string): Response {
+  const html = `${htmlHead('Bounty — Agent Bounties', 'sBTC bounty detail on the AIBTC agent bounty platform.', nonce)}
+<body>
+<main>
+<a href="/" class="back-link">&larr; All Bounties</a>
+
+<div id="bounty-detail">
+<div class="loading">Loading bounty&hellip;</div>
+</div>
+
+${htmlFooter()}
+</main>
+
+<script nonce="${nonce}">
+(function(){
+  var id=window.location.pathname.split('/').pop();
+  if(!id||!/^\\d+$/.test(id)){
+    document.getElementById('bounty-detail').innerHTML='<div class="error-msg">Invalid bounty ID.</div>';
+    return;
+  }
+
+  function escapeHtml(s){
+    if(!s)return'';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function formatSats(n){
+    if(n>=1e6)return(n/1e6).toFixed(1)+'M';
+    if(n>=1e3)return(n/1e3).toFixed(1)+'K';
+    return String(n);
+  }
+
+  function formatDate(iso){
+    if(!iso)return'—';
+    return new Date(iso).toLocaleString();
+  }
+
+  function truncAddr(a){
+    if(!a)return'—';
+    if(a.length<=16)return a;
+    return a.slice(0,8)+'\\u2026'+a.slice(-6);
+  }
+
+  var STEPS=['open','claimed','submitted','approved','paid'];
+
+  function renderTimeline(status){
+    var current=STEPS.indexOf(status);
+    if(status==='cancelled')return'<div style="margin:1.5rem 0"><span class="badge badge-cancelled">cancelled</span></div>';
+    var h='<div class="timeline">';
+    STEPS.forEach(function(step,i){
+      var cls=i<current?'done':i===current?'active':'';
+      if(i>0)h+='<div class="tl-line'+(i<=current?' done':'')+'"></div>';
+      h+='<div class="tl-step"><div class="tl-dot '+cls+'"></div><span class="tl-label '+cls+'">'+step+'</span></div>';
+    });
+    h+='</div>';
+    return h;
+  }
+
+  fetch('/api/bounties/'+id).then(function(r){
+    if(!r.ok)throw new Error(r.status);
+    return r.json();
+  }).then(function(d){
+    var b=d.bounty;
+    if(!b){document.getElementById('bounty-detail').innerHTML='<div class="error-msg">Bounty not found.</div>';return;}
+
+    document.title=escapeHtml(b.title)+' — Agent Bounties';
+
+    var tags='';
+    if(b.tags){
+      b.tags.split(',').forEach(function(t){t=t.trim();if(t)tags+='<span class="tag">'+escapeHtml(t)+'</span>';});
+    }
+
+    var html='<div class="detail-header">'
+      +'<div class="detail-title">'+escapeHtml(b.title)+'</div>'
+      +'<div class="detail-amount">'+formatSats(b.amount_sats)+' sats sBTC</div>'
+      +'<div class="detail-meta">'
+      +'<strong>Creator:</strong> '+(escapeHtml(b.creator_name)||escapeHtml(b.creator_stx))+'<br>'
+      +(b.deadline?'<strong>Deadline:</strong> '+formatDate(b.deadline)+'<br>':'')
+      +'<strong>Created:</strong> '+formatDate(b.created_at)
+      +(b.updated_at&&b.updated_at!==b.created_at?'<br><strong>Updated:</strong> '+formatDate(b.updated_at):'')
+      +'</div>'
+      +(tags?'<div class="card-tags" style="margin-top:0.6rem">'+tags+'</div>':'')
+      +'</div>';
+
+    html+=renderTimeline(b.status||'open');
+
+    if(b.description){
+      html+='<div class="divider"></div><div class="detail-desc">'+escapeHtml(b.description)+'</div>';
+    }
+
+    // Claims
+    var claims=d.claims||[];
+    if(claims.length>0){
+      html+='<div class="divider"></div><div class="section-title">Claims ('+claims.length+')</div>';
+      claims.forEach(function(c){
+        html+='<div class="entry-card">'
+          +'<div class="entry-header"><span class="entry-label">'+escapeHtml(c.status||'active')+'</span>'
+          +'<span class="entry-addr" title="'+escapeHtml(c.claimer_btc)+'">'+escapeHtml(truncAddr(c.claimer_btc))
+          +(c.claimer_stx?' &middot; '+escapeHtml(truncAddr(c.claimer_stx)):'')+'</span></div>'
+          +(c.message?'<div class="entry-body">'+escapeHtml(c.message)+'</div>':'')
+          +'<div class="entry-time">'+formatDate(c.created_at)+'</div>'
+          +'</div>';
+      });
+    }
+
+    // Submissions
+    var subs=d.submissions||[];
+    if(subs.length>0){
+      html+='<div class="divider"></div><div class="section-title">Submissions ('+subs.length+')</div>';
+      subs.forEach(function(s){
+        html+='<div class="entry-card">'
+          +'<div class="entry-header"><span class="entry-label">'+escapeHtml(s.status||'pending')+'</span></div>'
+          +(s.proof_url?'<div class="entry-body"><strong>Proof:</strong> <a href="'+escapeHtml(s.proof_url)+'" target="_blank" rel="noopener">'+escapeHtml(s.proof_url)+'</a></div>':'')
+          +(s.description?'<div class="entry-body">'+escapeHtml(s.description)+'</div>':'')
+          +(s.reviewer_notes?'<div class="entry-body" style="color:var(--gold-dim)"><strong>Review:</strong> '+escapeHtml(s.reviewer_notes)+'</div>':'')
+          +'<div class="entry-time">'+formatDate(s.created_at)+'</div>'
+          +'</div>';
+      });
+    }
+
+    // Payments
+    var pays=d.payments||[];
+    if(pays.length>0){
+      html+='<div class="divider"></div><div class="section-title">Payments ('+pays.length+')</div>';
+      pays.forEach(function(p){
+        var statusTag=p.status==='confirmed'?'<span class="verified-tag">Verified</span>':'<span class="failed-tag">Pending</span>';
+        html+='<div class="entry-card">'
+          +'<div class="entry-header"><span class="entry-label">'+formatSats(p.amount_sats)+' sats</span>'+statusTag+'</div>'
+          +'<div class="entry-body"><strong>Tx:</strong> <a href="https://explorer.stacks.co/txid/0x'+escapeHtml(p.tx_hash)+'?chain=mainnet" target="_blank" rel="noopener">0x'+escapeHtml(p.tx_hash?p.tx_hash.slice(0,16)+'\\u2026':'—')+'</a></div>'
+          +'<div class="entry-body"><strong>From:</strong> '+escapeHtml(truncAddr(p.from_stx))+' &rarr; <strong>To:</strong> '+escapeHtml(truncAddr(p.to_stx))+'</div>'
+          +(p.verified_at?'<div class="entry-time">Verified '+formatDate(p.verified_at)+'</div>':'')
+          +'</div>';
+      });
+    }
+
+    document.getElementById('bounty-detail').innerHTML=html;
+  }).catch(function(e){
+    document.getElementById('bounty-detail').innerHTML='<div class="error-msg">Failed to load bounty.</div>';
+  });
+})();
+</script>
+</body>
+</html>`;
+
+  return withSecurityHeaders(new Response(html, {
+    headers: {
+      'Content-Type': 'text/html;charset=utf-8',
+      'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+    },
+  }), nonce);
+}
+
+function renderNotFound(nonce: string): Response {
+  const html = `${htmlHead('Not Found — Agent Bounties', 'Page not found.', nonce)}
+<body>
+<main>
+<h1 style="margin-top:4rem">404</h1>
+<p class="subtitle">Page not found</p>
+<div style="text-align:center;margin-top:2rem">
+<a href="/" style="font-family:'Cinzel',Georgia,serif;font-size:0.9rem;letter-spacing:0.08em">&larr; Return to Bounties</a>
+</div>
+${htmlFooter()}
+</main>
+</body>
+</html>`;
+
+  return withSecurityHeaders(new Response(html, {
+    status: 404,
+    headers: {
+      'Content-Type': 'text/html;charset=utf-8',
+      'Cache-Control': 'no-cache',
+    },
+  }), nonce);
+}
+
 // ─── Route Handlers ──────────────────────────────────────────────────────────
 
 // GET /api/bounties — List bounties with optional filters
@@ -1396,13 +1914,14 @@ export default {
     try {
       // ── GET routes ──
       if (method === 'GET') {
+        // API routes (JSON)
         if (path === '/api/bounties') {
           return handleListBounties(url, db, corsOrigin ?? '*');
         }
 
-        const bountyMatch = path.match(/^\/api\/bounties\/(\d+)$/);
-        if (bountyMatch) {
-          return handleGetBounty(bountyMatch[1], db, corsOrigin ?? '*');
+        const bountyApiMatch = path.match(/^\/api\/bounties\/(\d+)$/);
+        if (bountyApiMatch) {
+          return handleGetBounty(bountyApiMatch[1], db, corsOrigin ?? '*');
         }
 
         const agentMatch = path.match(/^\/api\/agents\/([A-Za-z0-9]+)$/);
@@ -1414,14 +1933,31 @@ export default {
           return handleStats(db, corsOrigin ?? '*');
         }
 
-        // Health check
-        if (path === '/' || path === '/health') {
+        // Health check (JSON)
+        if (path === '/health') {
           return json({
             name: 'agent-bounties',
             version: '1.0.0',
             status: 'ok',
             timestamp: new Date().toISOString(),
           }, 200, corsOrigin ?? '*');
+        }
+
+        // HTML pages
+        const nonce = crypto.randomUUID().replace(/-/g, '');
+
+        if (path === '/') {
+          return renderHomePage(nonce);
+        }
+
+        const bountyPageMatch = path.match(/^\/bounties\/(\d+)$/);
+        if (bountyPageMatch) {
+          return renderBountyPage(nonce);
+        }
+
+        // Non-API, non-HTML routes → 404 HTML
+        if (!path.startsWith('/api/')) {
+          return renderNotFound(nonce);
         }
 
         return json({ error: 'Not found' }, 404, corsOrigin ?? '*');
