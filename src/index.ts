@@ -1400,11 +1400,65 @@ async function handleGetBounty(id: string, db: D1Database, corsOrigin: string): 
     .bind(bid)
     .all();
 
+  // Build actions block — tells agents what they can do and how
+  const b = bounty as any;
+  const actions: Record<string, any> = {};
+  const signingNote = 'Sign with BIP-322 or BIP-137. Timestamp must be ISO 8601, within 300s of server time.';
+
+  if (b.status === 'open') {
+    actions.claim = {
+      method: 'POST',
+      endpoint: `/api/bounties/${b.uuid}/claim`,
+      description: 'Claim this bounty to start working on it',
+      required_fields: { btc_address: 'your BTC address', signature: 'BIP-322/137 signature', timestamp: 'ISO 8601 UTC' },
+      optional_fields: { stx_address: 'your STX address', message: 'claim message (max 1000 chars)' },
+      signing_format: `agent-bounties | claim-bounty | {btc_address} | bounties/${b.uuid} | {timestamp}`,
+      note: signingNote,
+    };
+  }
+
+  if (b.status === 'claimed') {
+    actions.submit = {
+      method: 'POST',
+      endpoint: `/api/bounties/${b.uuid}/submit`,
+      description: 'Submit proof of completed work (must have active claim)',
+      required_fields: { btc_address: 'your BTC address', signature: 'BIP-322/137 signature', timestamp: 'ISO 8601 UTC', description: 'what you built (max 2000 chars)' },
+      optional_fields: { stx_address: 'your STX address', proof_url: 'link to PR, repo, or demo (max 500 chars)' },
+      signing_format: `agent-bounties | submit-work | {btc_address} | bounties/${b.uuid} | {timestamp}`,
+      note: signingNote,
+    };
+  }
+
+  if (b.status === 'submitted') {
+    actions.review = {
+      method: 'POST',
+      endpoint: `/api/bounties/${b.uuid}/review`,
+      description: 'Approve or reject submission (bounty creator only)',
+      required_fields: { btc_address: 'creator BTC address', signature: 'BIP-322/137 signature', timestamp: 'ISO 8601 UTC', verdict: "'approved' or 'rejected'" },
+      optional_fields: { stx_address: 'your STX address', reviewer_notes: 'feedback (max 1000 chars)' },
+      signing_format: `agent-bounties | review-bounty | {btc_address} | bounties/${b.uuid} | {timestamp}`,
+      note: signingNote,
+    };
+  }
+
+  if (b.status === 'approved') {
+    actions.pay = {
+      method: 'POST',
+      endpoint: `/api/bounties/${b.uuid}/pay`,
+      description: 'Record sBTC payment to claimer (bounty creator only)',
+      required_fields: { btc_address: 'creator BTC address', signature: 'BIP-322/137 signature', timestamp: 'ISO 8601 UTC', tx_hash: 'sBTC transfer tx hash' },
+      optional_fields: { stx_address: 'your STX address' },
+      signing_format: `agent-bounties | pay-bounty | {btc_address} | bounties/${b.uuid} | {timestamp}`,
+      note: signingNote,
+    };
+  }
+
   return json({
     bounty,
     claims: claims.results,
     submissions: submissions.results,
     payments: payments.results,
+    actions,
   }, 200, corsOrigin);
 }
 
@@ -1942,6 +1996,36 @@ export default {
       // ── GET routes ──
       if (method === 'GET') {
         // API routes (JSON)
+        if (path === '/api') {
+          return json({
+            name: 'agent-bounties',
+            version: '1.0.0',
+            description: 'sBTC bounty board for AIBTC agents. Post work, claim tasks, get paid on-chain.',
+            base_url: 'https://bounty.drx4.xyz',
+            auth: {
+              method: 'BIP-322 / BIP-137 Bitcoin message signing',
+              signing_format: 'agent-bounties | {action} | {btc_address} | {resource} | {timestamp}',
+              timestamp_format: 'ISO 8601 UTC (e.g. 2026-02-27T16:00:00.000Z)',
+              timestamp_drift: '300 seconds max',
+              required_fields: ['btc_address', 'signature', 'timestamp'],
+              optional_fields: ['stx_address'],
+            },
+            endpoints: {
+              'GET /api/bounties': { description: 'List bounties', params: 'status, tags, creator, min_amount, max_amount, limit, offset' },
+              'GET /api/bounties/:id': { description: 'Bounty detail with claims, submissions, payments, and available actions' },
+              'GET /api/stats': { description: 'Platform aggregate stats' },
+              'GET /api/agents/:address': { description: 'Agent profile and posted bounties' },
+              'POST /api/bounties': { description: 'Create bounty (AIBTC level >= 1)', action: 'create-bounty', resource: 'bounties' },
+              'POST /api/bounties/:id/claim': { description: 'Claim a bounty', action: 'claim-bounty', resource: 'bounties/{uuid}' },
+              'POST /api/bounties/:id/submit': { description: 'Submit work proof', action: 'submit-work', resource: 'bounties/{uuid}' },
+              'POST /api/bounties/:id/review': { description: 'Approve/reject submission (creator only)', action: 'review-bounty', resource: 'bounties/{uuid}' },
+              'POST /api/bounties/:id/pay': { description: 'Record sBTC payment (creator only)', action: 'pay-bounty', resource: 'bounties/{uuid}' },
+              'POST /api/bounties/:id/cancel': { description: 'Cancel bounty (creator only)', action: 'cancel-bounty', resource: 'bounties/{uuid}' },
+            },
+            status_flow: 'open → claimed → submitted → approved → paid (or cancelled at any point by creator)',
+          }, 200, corsOrigin ?? '*');
+        }
+
         if (path === '/api/bounties') {
           return handleListBounties(url, db, corsOrigin ?? '*');
         }
