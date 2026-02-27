@@ -1066,9 +1066,9 @@ ${htmlFooter()}
           });
         }
         var deadline=b.deadline?'<span class="card-deadline">'+relativeTime(b.deadline)+'</span>':'';
-        html+='<a class="bounty-card" href="/bounties/'+b.id+'">'
+        html+='<a class="bounty-card" href="/bounties/'+(b.uuid||b.id)+'">'
           +'<div class="card-header">'
-          +'<span class="card-title">'+escapeHtml(b.title)+'</span>'
+          +'<span class="card-title"><span style="opacity:0.4;font-weight:400">#'+b.id+'</span> '+escapeHtml(b.title)+'</span>'
           +'<span class="card-amount">'+formatSats(b.amount_sats)+' sats</span>'
           +'</div>'
           +'<div class="card-meta">'
@@ -1195,7 +1195,7 @@ ${htmlFooter()}
     }
 
     var html='<div class="detail-header">'
-      +'<div class="detail-title">'+escapeHtml(b.title)+'</div>'
+      +'<div class="detail-title"><span style="opacity:0.5;font-size:0.65em;font-weight:400">#'+b.id+'</span> '+escapeHtml(b.title)+'</div>'
       +'<div class="detail-amount">'+formatSats(b.amount_sats)+' sats sBTC</div>'
       +'<div class="detail-meta">'
       +'<strong>Creator:</strong> '+(escapeHtml(b.creator_name)||escapeHtml(b.creator_stx))+'<br>'
@@ -1364,31 +1364,41 @@ async function handleListBounties(url: URL, db: D1Database, corsOrigin: string):
   }, 200, corsOrigin);
 }
 
+// Resolve bounty by UUID (or fall back to integer id for backwards compat)
+async function resolveBounty(id: string, db: D1Database): Promise<any | null> {
+  // Try UUID first
+  if (/^[a-f0-9-]+$/.test(id) && id.length >= 20) {
+    return db.prepare('SELECT * FROM bounties WHERE uuid = ?').bind(id).first();
+  }
+  // Fall back to integer id
+  const num = parseInt(id, 10);
+  if (!isNaN(num)) return db.prepare('SELECT * FROM bounties WHERE id = ?').bind(num).first();
+  return null;
+}
+
 // GET /api/bounties/:id — Bounty detail with claims, submissions, payments
 async function handleGetBounty(id: string, db: D1Database, corsOrigin: string): Promise<Response> {
-  const bountyId = parseInt(id, 10);
-  if (isNaN(bountyId)) return json({ error: 'Invalid bounty ID' }, 400, corsOrigin);
-
   const bounty = await db
-    .prepare('SELECT b.*, a.display_name as creator_name FROM bounties b LEFT JOIN agents a ON b.creator_stx = a.stx_address WHERE b.id = ?')
-    .bind(bountyId)
+    .prepare('SELECT b.*, a.display_name as creator_name FROM bounties b LEFT JOIN agents a ON b.creator_stx = a.stx_address WHERE b.uuid = ? OR b.id = ?')
+    .bind(id, parseInt(id, 10) || 0)
     .first();
 
   if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
 
+  const bid = (bounty as any).id;
   const claims = await db
     .prepare('SELECT * FROM claims WHERE bounty_id = ? ORDER BY created_at DESC')
-    .bind(bountyId)
+    .bind(bid)
     .all();
 
   const submissions = await db
     .prepare('SELECT * FROM submissions WHERE bounty_id = ? ORDER BY created_at DESC')
-    .bind(bountyId)
+    .bind(bid)
     .all();
 
   const payments = await db
     .prepare('SELECT * FROM payments WHERE bounty_id = ? ORDER BY created_at DESC')
-    .bind(bountyId)
+    .bind(bid)
     .all();
 
   return json({
@@ -1481,13 +1491,14 @@ async function handleCreateBounty(body: any, db: D1Database, corsOrigin: string)
   // Ensure agent row exists
   await ensureAgent(db, auth.stxAddress, auth.btcAddress, aibtcAgent.display_name ?? undefined, aibtcAgent.level);
 
-  // Insert bounty
+  // Insert bounty with UUID
+  const bountyUuid = crypto.randomUUID();
   const result = await dbRun(db
     .prepare(
-      `INSERT INTO bounties (creator_stx, title, description, amount_sats, tags, deadline)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO bounties (uuid, creator_stx, title, description, amount_sats, tags, deadline)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(auth.stxAddress, body.title, body.description, body.amount_sats, body.tags || null, body.deadline || null)
+    .bind(bountyUuid, auth.stxAddress, body.title, body.description, body.amount_sats, body.tags || null, body.deadline || null)
   );
 
   // Update agent stats
@@ -1504,14 +1515,12 @@ async function handleCreateBounty(body: any, db: D1Database, corsOrigin: string)
 
 // PATCH /api/bounties/:id — Update bounty (creator only, open only)
 async function handleUpdateBounty(id: string, body: any, db: D1Database, corsOrigin: string): Promise<Response> {
-  const bountyId = parseInt(id, 10);
-  if (isNaN(bountyId)) return json({ error: 'Invalid bounty ID' }, 400, corsOrigin);
+  const bounty = await resolveBounty(id, db) as any;
+  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
+  const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'update-bounty', `bounties/${bountyId}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
-
-  const bounty = await db.prepare('SELECT * FROM bounties WHERE id = ?').bind(bountyId).first<any>();
-  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Can only update open bounties' }, 409, corsOrigin);
 
   // Verify creator - match via BTC address lookup
@@ -1561,14 +1570,12 @@ async function handleUpdateBounty(id: string, body: any, db: D1Database, corsOri
 
 // DELETE /api/bounties/:id — Cancel bounty (creator only, open only)
 async function handleCancelBounty(id: string, body: any, db: D1Database, corsOrigin: string): Promise<Response> {
-  const bountyId = parseInt(id, 10);
-  if (isNaN(bountyId)) return json({ error: 'Invalid bounty ID' }, 400, corsOrigin);
+  const bounty = await resolveBounty(id, db) as any;
+  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
+  const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'cancel-bounty', `bounties/${bountyId}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
-
-  const bounty = await db.prepare('SELECT * FROM bounties WHERE id = ?').bind(bountyId).first<any>();
-  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Can only cancel open bounties' }, 409, corsOrigin);
 
   const creator = await db.prepare('SELECT btc_address FROM agents WHERE stx_address = ?').bind(bounty.creator_stx).first<{ btc_address: string }>();
@@ -1586,14 +1593,12 @@ async function handleCancelBounty(id: string, body: any, db: D1Database, corsOri
 
 // POST /api/bounties/:id/claim — Claim a bounty
 async function handleClaimBounty(id: string, body: any, db: D1Database, corsOrigin: string): Promise<Response> {
-  const bountyId = parseInt(id, 10);
-  if (isNaN(bountyId)) return json({ error: 'Invalid bounty ID' }, 400, corsOrigin);
+  const bounty = await resolveBounty(id, db) as any;
+  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
+  const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'claim-bounty', `bounties/${bountyId}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
-
-  const bounty = await db.prepare('SELECT * FROM bounties WHERE id = ?').bind(bountyId).first<any>();
-  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Bounty is not open for claims' }, 409, corsOrigin);
 
   // Can't claim your own bounty
@@ -1644,14 +1649,12 @@ async function handleClaimBounty(id: string, body: any, db: D1Database, corsOrig
 
 // POST /api/bounties/:id/submit — Submit work proof
 async function handleSubmitWork(id: string, body: any, db: D1Database, corsOrigin: string): Promise<Response> {
-  const bountyId = parseInt(id, 10);
-  if (isNaN(bountyId)) return json({ error: 'Invalid bounty ID' }, 400, corsOrigin);
+  const bounty = await resolveBounty(id, db) as any;
+  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
+  const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'submit-work', `bounties/${bountyId}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
-
-  const bounty = await db.prepare('SELECT * FROM bounties WHERE id = ?').bind(bountyId).first<any>();
-  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   if (bounty.status !== 'claimed') return json({ error: 'Bounty must be in claimed status' }, 409, corsOrigin);
 
   // Must have an active claim
@@ -1695,14 +1698,12 @@ async function handleSubmitWork(id: string, body: any, db: D1Database, corsOrigi
 
 // POST /api/bounties/:id/review — Approve or reject submission (creator only)
 async function handleReview(id: string, body: any, db: D1Database, corsOrigin: string): Promise<Response> {
-  const bountyId = parseInt(id, 10);
-  if (isNaN(bountyId)) return json({ error: 'Invalid bounty ID' }, 400, corsOrigin);
+  const bounty = await resolveBounty(id, db) as any;
+  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
+  const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'review-bounty', `bounties/${bountyId}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
-
-  const bounty = await db.prepare('SELECT * FROM bounties WHERE id = ?').bind(bountyId).first<any>();
-  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   if (bounty.status !== 'submitted') return json({ error: 'Bounty must be in submitted status' }, 409, corsOrigin);
 
   // Creator only
@@ -1763,14 +1764,12 @@ async function handleReview(id: string, body: any, db: D1Database, corsOrigin: s
 
 // POST /api/bounties/:id/pay — Submit tx_hash, platform verifies on-chain
 async function handlePay(id: string, body: any, db: D1Database, corsOrigin: string): Promise<Response> {
-  const bountyId = parseInt(id, 10);
-  if (isNaN(bountyId)) return json({ error: 'Invalid bounty ID' }, 400, corsOrigin);
+  const bounty = await resolveBounty(id, db) as any;
+  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
+  const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'pay-bounty', `bounties/${bountyId}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
-
-  const bounty = await db.prepare('SELECT * FROM bounties WHERE id = ?').bind(bountyId).first<any>();
-  if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   if (bounty.status !== 'approved') return json({ error: 'Bounty must be in approved status' }, 409, corsOrigin);
 
   // Creator only
@@ -1948,7 +1947,7 @@ export default {
           return handleListBounties(url, db, corsOrigin ?? '*');
         }
 
-        const bountyApiMatch = path.match(/^\/api\/bounties\/(\d+)$/);
+        const bountyApiMatch = path.match(/^\/api\/bounties\/([a-f0-9-]+)$/);
         if (bountyApiMatch) {
           return handleGetBounty(bountyApiMatch[1], db, corsOrigin ?? '*');
         }
@@ -1979,7 +1978,7 @@ export default {
           return renderHomePage(nonce);
         }
 
-        const bountyPageMatch = path.match(/^\/bounties\/(\d+)$/);
+        const bountyPageMatch = path.match(/^\/bounties\/([a-f0-9-]+)$/);
         if (bountyPageMatch) {
           return renderBountyPage(nonce);
         }
@@ -2021,22 +2020,22 @@ export default {
           return handleCreateBounty(body, db, corsOrigin);
         }
 
-        const claimMatch = path.match(/^\/api\/bounties\/(\d+)\/claim$/);
+        const claimMatch = path.match(/^\/api\/bounties\/([a-f0-9-]+)\/claim$/);
         if (claimMatch) {
           return handleClaimBounty(claimMatch[1], body, db, corsOrigin);
         }
 
-        const submitMatch = path.match(/^\/api\/bounties\/(\d+)\/submit$/);
+        const submitMatch = path.match(/^\/api\/bounties\/([a-f0-9-]+)\/submit$/);
         if (submitMatch) {
           return handleSubmitWork(submitMatch[1], body, db, corsOrigin);
         }
 
-        const reviewMatch = path.match(/^\/api\/bounties\/(\d+)\/review$/);
+        const reviewMatch = path.match(/^\/api\/bounties\/([a-f0-9-]+)\/review$/);
         if (reviewMatch) {
           return handleReview(reviewMatch[1], body, db, corsOrigin);
         }
 
-        const payMatch = path.match(/^\/api\/bounties\/(\d+)\/pay$/);
+        const payMatch = path.match(/^\/api\/bounties\/([a-f0-9-]+)\/pay$/);
         if (payMatch) {
           return handlePay(payMatch[1], body, db, corsOrigin);
         }
@@ -2044,7 +2043,7 @@ export default {
 
       // ── PATCH routes ──
       if (method === 'PATCH') {
-        const patchMatch = path.match(/^\/api\/bounties\/(\d+)$/);
+        const patchMatch = path.match(/^\/api\/bounties\/([a-f0-9-]+)$/);
         if (patchMatch) {
           return handleUpdateBounty(patchMatch[1], body, db, corsOrigin);
         }
@@ -2052,7 +2051,7 @@ export default {
 
       // ── DELETE routes ──
       if (method === 'DELETE') {
-        const deleteMatch = path.match(/^\/api\/bounties\/(\d+)$/);
+        const deleteMatch = path.match(/^\/api\/bounties\/([a-f0-9-]+)$/);
         if (deleteMatch) {
           return handleCancelBounty(deleteMatch[1], body, db, corsOrigin);
         }
