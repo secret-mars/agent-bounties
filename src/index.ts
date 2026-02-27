@@ -1218,7 +1218,7 @@ ${htmlFooter()}
       claims.forEach(function(c){
         html+='<div class="entry-card">'
           +'<div class="entry-header"><span class="entry-label">'+escapeHtml(c.status||'active')+'</span>'
-          +'<span class="entry-addr" title="'+escapeHtml(c.claimer_btc)+'">'+escapeHtml(truncAddr(c.claimer_btc))
+          +'<span class="entry-addr" title="'+escapeHtml(c.claimer_btc)+'">'+(c.claimer_name?escapeHtml(c.claimer_name)+' &middot; ':'')+escapeHtml(truncAddr(c.claimer_btc))
           +(c.claimer_stx?' &middot; '+escapeHtml(truncAddr(c.claimer_stx)):'')+'</span></div>'
           +(c.message?'<div class="entry-body">'+escapeHtml(c.message)+'</div>':'')
           +'<div class="entry-time">'+formatDate(c.created_at)+'</div>'
@@ -1232,7 +1232,8 @@ ${htmlFooter()}
       html+='<div class="divider"></div><div class="section-title">Submissions ('+subs.length+')</div>';
       subs.forEach(function(s){
         html+='<div class="entry-card">'
-          +'<div class="entry-header"><span class="entry-label">'+escapeHtml(s.status||'pending')+'</span></div>'
+          +'<div class="entry-header"><span class="entry-label">'+escapeHtml(s.status||'pending')+'</span>'
+          +(s.submitter_name?'<span class="entry-addr">'+escapeHtml(s.submitter_name)+'</span>':'')+'</div>'
           +(s.proof_url?'<div class="entry-body"><strong>Proof:</strong> <a href="'+escapeHtml(s.proof_url)+'" target="_blank" rel="noopener">'+escapeHtml(s.proof_url)+'</a></div>':'')
           +(s.description?'<div class="entry-body">'+escapeHtml(s.description)+'</div>':'')
           +(s.reviewer_notes?'<div class="entry-body" style="color:var(--gold-dim)"><strong>Review:</strong> '+escapeHtml(s.reviewer_notes)+'</div>':'')
@@ -1386,12 +1387,12 @@ async function handleGetBounty(id: string, db: D1Database, corsOrigin: string): 
 
   const bid = (bounty as any).id;
   const claims = await db
-    .prepare('SELECT * FROM claims WHERE bounty_id = ? ORDER BY created_at DESC')
+    .prepare('SELECT c.*, a.display_name as claimer_name FROM claims c LEFT JOIN agents a ON c.claimer_stx = a.stx_address WHERE c.bounty_id = ? ORDER BY c.created_at DESC')
     .bind(bid)
     .all();
 
   const submissions = await db
-    .prepare('SELECT * FROM submissions WHERE bounty_id = ? ORDER BY created_at DESC')
+    .prepare('SELECT s.*, a.display_name as submitter_name FROM submissions s LEFT JOIN claims c ON s.claim_id = c.id LEFT JOIN agents a ON c.claimer_stx = a.stx_address WHERE s.bounty_id = ? ORDER BY s.created_at DESC')
     .bind(bid)
     .all();
 
