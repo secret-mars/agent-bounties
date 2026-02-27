@@ -1519,7 +1519,7 @@ async function handleUpdateBounty(id: string, body: any, db: D1Database, corsOri
   if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   const bountyId = bounty.id;
 
-  const auth = await validateAuth(body, db, 'update-bounty', `bounties/${bountyId}`);
+  const auth = await validateAuth(body, db, 'update-bounty', `bounties/${bounty.uuid}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Can only update open bounties' }, 409, corsOrigin);
 
@@ -1574,7 +1574,7 @@ async function handleCancelBounty(id: string, body: any, db: D1Database, corsOri
   if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   const bountyId = bounty.id;
 
-  const auth = await validateAuth(body, db, 'cancel-bounty', `bounties/${bountyId}`);
+  const auth = await validateAuth(body, db, 'cancel-bounty', `bounties/${bounty.uuid}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Can only cancel open bounties' }, 409, corsOrigin);
 
@@ -1597,7 +1597,7 @@ async function handleClaimBounty(id: string, body: any, db: D1Database, corsOrig
   if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   const bountyId = bounty.id;
 
-  const auth = await validateAuth(body, db, 'claim-bounty', `bounties/${bountyId}`);
+  const auth = await validateAuth(body, db, 'claim-bounty', `bounties/${bounty.uuid}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Bounty is not open for claims' }, 409, corsOrigin);
 
@@ -1653,7 +1653,7 @@ async function handleSubmitWork(id: string, body: any, db: D1Database, corsOrigi
   if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   const bountyId = bounty.id;
 
-  const auth = await validateAuth(body, db, 'submit-work', `bounties/${bountyId}`);
+  const auth = await validateAuth(body, db, 'submit-work', `bounties/${bounty.uuid}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'claimed') return json({ error: 'Bounty must be in claimed status' }, 409, corsOrigin);
 
@@ -1702,7 +1702,7 @@ async function handleReview(id: string, body: any, db: D1Database, corsOrigin: s
   if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   const bountyId = bounty.id;
 
-  const auth = await validateAuth(body, db, 'review-bounty', `bounties/${bountyId}`);
+  const auth = await validateAuth(body, db, 'review-bounty', `bounties/${bounty.uuid}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'submitted') return json({ error: 'Bounty must be in submitted status' }, 409, corsOrigin);
 
@@ -1768,7 +1768,7 @@ async function handlePay(id: string, body: any, db: D1Database, corsOrigin: stri
   if (!bounty) return json({ error: 'Bounty not found' }, 404, corsOrigin);
   const bountyId = bounty.id;
 
-  const auth = await validateAuth(body, db, 'pay-bounty', `bounties/${bountyId}`);
+  const auth = await validateAuth(body, db, 'pay-bounty', `bounties/${bounty.uuid}`);
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'approved') return json({ error: 'Bounty must be in approved status' }, 409, corsOrigin);
 
