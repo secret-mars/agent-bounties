@@ -698,7 +698,7 @@ async function validateAuth(
   db: D1Database,
   action: string,
   resource: string
-): Promise<{ error: string } | { btcAddress: string; stxAddress?: string }> {
+): Promise<{ error: string; expected_message?: string; signing_format?: string; hint?: string } | { btcAddress: string; stxAddress?: string }> {
   if (!body.btc_address) return { error: 'Required: btc_address' };
   if (!isValidBtcAddress(body.btc_address)) return { error: 'Invalid btc_address' };
   if (body.stx_address && !isValidStxAddress(body.stx_address)) return { error: 'Invalid stx_address' };
@@ -716,7 +716,12 @@ async function validateAuth(
 
   const expectedMessage = `agent-bounties | ${action} | ${body.btc_address} | ${resource} | ${body.timestamp}`;
   const sigErr = await verifySignature(body.signature, expectedMessage, body.btc_address);
-  if (sigErr) return { error: sigErr };
+  if (sigErr) return {
+    error: `Signature verification failed: ${sigErr}`,
+    expected_message: expectedMessage,
+    signing_format: 'agent-bounties | {action} | {btc_address} | {resource} | {timestamp}',
+    hint: `Sign exactly this string with btc_sign_message: "${expectedMessage}"`,
+  };
 
   // Replay protection
   await cleanupExpiredSignatures(db);
@@ -1505,7 +1510,7 @@ async function handleStats(db: D1Database, corsOrigin: string): Promise<Response
 async function handleCreateBounty(body: any, db: D1Database, corsOrigin: string): Promise<Response> {
   // Auth
   const auth = await validateAuth(body, db, 'create-bounty', 'bounties');
-  if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
+  if ('error' in auth) return json(auth, 401, corsOrigin);
 
   // Must provide STX address for AIBTC verification
   if (!auth.stxAddress) return json({ error: 'stx_address required for bounty creation' }, 400, corsOrigin);
@@ -1568,7 +1573,7 @@ async function handleUpdateBounty(id: string, body: any, db: D1Database, corsOri
   const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'update-bounty', `bounties/${bounty.uuid}`);
-  if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
+  if ('error' in auth) return json(auth, 401, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Can only update open bounties' }, 409, corsOrigin);
 
   // Admin or creator only
@@ -1626,7 +1631,7 @@ async function handleCancelBounty(id: string, body: any, db: D1Database, corsOri
   const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'cancel-bounty', `bounties/${bounty.uuid}`);
-  if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
+  if ('error' in auth) return json(auth, 401, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Can only cancel open bounties' }, 409, corsOrigin);
 
   // Admin or creator only
@@ -1653,7 +1658,7 @@ async function handleClaimBounty(id: string, body: any, db: D1Database, corsOrig
   const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'claim-bounty', `bounties/${bounty.uuid}`);
-  if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
+  if ('error' in auth) return json(auth, 401, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Bounty is not open for claims' }, 409, corsOrigin);
 
   // Can't claim your own bounty
@@ -1709,7 +1714,7 @@ async function handleSubmitWork(id: string, body: any, db: D1Database, corsOrigi
   const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'submit-work', `bounties/${bounty.uuid}`);
-  if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
+  if ('error' in auth) return json(auth, 401, corsOrigin);
   if (bounty.status !== 'claimed') return json({ error: 'Bounty must be in claimed status' }, 409, corsOrigin);
 
   // Must have an active claim
@@ -1758,7 +1763,7 @@ async function handleReview(id: string, body: any, db: D1Database, corsOrigin: s
   const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'review-bounty', `bounties/${bounty.uuid}`);
-  if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
+  if ('error' in auth) return json(auth, 401, corsOrigin);
   if (bounty.status !== 'submitted') return json({ error: 'Bounty must be in submitted status' }, 409, corsOrigin);
 
   // Admin or creator only
@@ -1827,7 +1832,7 @@ async function handlePay(id: string, body: any, db: D1Database, corsOrigin: stri
   const bountyId = bounty.id;
 
   const auth = await validateAuth(body, db, 'pay-bounty', `bounties/${bounty.uuid}`);
-  if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
+  if ('error' in auth) return json(auth, 401, corsOrigin);
   if (bounty.status !== 'approved') return json({ error: 'Bounty must be in approved status' }, 409, corsOrigin);
 
   // Admin or creator only
