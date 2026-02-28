@@ -944,7 +944,124 @@ function statusBadge(status: string): string {
   return `<span class="badge badge-${s}">${s}</span>`;
 }
 
-function renderHomePage(nonce: string): Response {
+type HomeBountyRow = {
+  id: number;
+  uuid: string | null;
+  creator_stx: string | null;
+  creator_name: string | null;
+  title: string;
+  amount_sats: number;
+  tags: string | null;
+  status: string;
+  deadline: string | null;
+};
+
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatSatsCompact(sats: number): string {
+  if (sats >= 1e6) {
+    const v = (sats / 1e6).toFixed(1);
+    return v.replace(/\.0$/, '') + 'M';
+  }
+  if (sats >= 1e3) {
+    const v = (sats / 1e3).toFixed(1);
+    return v.replace(/\.0$/, '') + 'K';
+  }
+  return String(sats);
+}
+
+function relativeTimeLabel(iso: string | null): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '';
+  const diff = t - Date.now();
+  if (diff > 0) {
+    const hrs = Math.ceil(diff / 36e5);
+    if (hrs <= 24) return hrs === 1 ? '1 hour left' : `${hrs} hours left`;
+    const days = Math.ceil(diff / 864e5);
+    return days === 1 ? '1 day left' : `${days} days left`;
+  }
+  const ago = Math.abs(diff);
+  const hrsAgo = Math.floor(ago / 36e5);
+  if (hrsAgo < 1) return 'just now';
+  if (hrsAgo < 24) return hrsAgo === 1 ? '1 hour ago' : `${hrsAgo} hours ago`;
+  const daysAgo = Math.floor(ago / 864e5);
+  return daysAgo === 1 ? '1 day ago' : `${daysAgo} days ago`;
+}
+
+function renderInitialBountyCard(bounty: HomeBountyRow): string {
+  let tags = '';
+  if (bounty.tags) {
+    for (const rawTag of bounty.tags.split(',')) {
+      const tag = rawTag.trim();
+      if (tag) tags += `<span class="tag">${escapeHtml(tag)}</span>`;
+    }
+  }
+
+  const deadline = bounty.deadline ? `<span class="card-deadline">${relativeTimeLabel(bounty.deadline)}</span>` : '';
+  const hrefId = bounty.uuid || String(bounty.id);
+  const creatorLabel = bounty.creator_name || bounty.creator_stx || 'Unknown';
+  const amount = Number(bounty.amount_sats) || 0;
+  const safeStatus = (bounty.status || 'open').toLowerCase();
+
+  return `<a class="bounty-card" href="/bounties/${encodeURIComponent(hrefId)}">`
+    + `<span class="card-title">${escapeHtml(bounty.title)}</span>`
+    + `<span class="card-amount"><span class="btc-icon">\u20BF</span>${formatSatsCompact(amount)} sats</span>`
+    + '<div class="card-meta">'
+    + `<span class="badge badge-${escapeHtml(safeStatus)}">${escapeHtml(safeStatus)}</span>`
+    + `<span class="card-creator">${escapeHtml(creatorLabel)}</span>`
+    + deadline
+    + '</div>'
+    + (tags ? `<div class="card-tags">${tags}</div>` : '')
+    + '</a>';
+}
+
+async function getHomePageBounties(db: D1Database, limit: number, offset: number): Promise<{ bounties: HomeBountyRow[]; total: number }> {
+  const listResult = await db
+    .prepare(`SELECT b.*, a.display_name as creator_name
+              FROM bounties b
+              LEFT JOIN agents a ON b.creator_stx = a.stx_address
+              ORDER BY b.created_at DESC
+              LIMIT ? OFFSET ?`)
+    .bind(limit, offset)
+    .all<HomeBountyRow>();
+
+  const countResult = await db.prepare('SELECT COUNT(*) as total FROM bounties').first<{ total: number }>();
+  return {
+    bounties: listResult.results ?? [],
+    total: countResult?.total ?? 0,
+  };
+}
+
+async function renderHomePage(db: D1Database, nonce: string): Promise<Response> {
+  const PAGE_SIZE = 20;
+  let initialCards = '<div class="loading">Loading bounties&hellip;</div>';
+  let initialPaginationStyle = 'display:none';
+  let initialPageInfo = '';
+  let nextDisabled = 'disabled';
+
+  try {
+    const { bounties, total } = await getHomePageBounties(db, PAGE_SIZE, 0);
+    if (bounties.length > 0) {
+      initialCards = bounties.map(renderInitialBountyCard).join('');
+    } else {
+      initialCards = '<div class="empty"><p>No bounties found.</p></div>';
+    }
+    if (total > PAGE_SIZE) {
+      initialPaginationStyle = 'display:flex';
+      initialPageInfo = `1 / ${Math.ceil(total / PAGE_SIZE)}`;
+      nextDisabled = '';
+    }
+  } catch {
+    // Keep an HTML fallback even if D1 is unavailable; JS will retry via /api/bounties.
+  }
+
   const html = `${htmlHead('AGENT BOUNTIES — bounty.drx4.xyz', 'sBTC bounties for AIBTC agents. Post work, claim tasks, get paid on-chain.', nonce)}
 <body>
 <main>
@@ -978,13 +1095,13 @@ function renderHomePage(nonce: string): Response {
 </div>
 
 <div id="bounty-list" class="bounty-grid">
-<div class="loading">Loading bounties&hellip;</div>
+${initialCards}
 </div>
 
-<div class="pagination" id="pagination" style="display:none">
+<div class="pagination" id="pagination" style="${initialPaginationStyle}">
 <button id="prev-btn" disabled>&laquo; Prev</button>
-<span class="page-info" id="page-info"></span>
-<button id="next-btn">Next &raquo;</button>
+<span class="page-info" id="page-info">${initialPageInfo}</span>
+<button id="next-btn" ${nextDisabled}>Next &raquo;</button>
 </div>
 
 ${htmlFooter()}
@@ -1033,12 +1150,14 @@ ${htmlFooter()}
     }).catch(function(){});
   }
 
-  function loadBounties(){
+  function loadBounties(showLoading){
     var status=document.getElementById('filter-status').value;
     var tags=document.getElementById('filter-tags').value.trim();
     var sort=document.getElementById('filter-sort').value;
     var list=document.getElementById('bounty-list');
-    list.innerHTML='<div class="loading">Loading bounties&hellip;</div>';
+    if(showLoading!==false){
+      list.innerHTML='<div class="loading">Loading bounties&hellip;</div>';
+    }
 
     var params='?status='+encodeURIComponent(status)+'&limit='+PAGE_SIZE+'&offset='+currentOffset;
     if(tags)params+='&tags='+encodeURIComponent(tags);
@@ -1102,7 +1221,7 @@ ${htmlFooter()}
   document.getElementById('next-btn').addEventListener('click',function(){if(currentOffset+PAGE_SIZE<totalCount){currentOffset+=PAGE_SIZE;loadBounties()}});
 
   loadStats();
-  loadBounties();
+  loadBounties(false);
 })();
 </script>
 </body>
@@ -2073,7 +2192,7 @@ export default {
         const nonce = crypto.randomUUID().replace(/-/g, '');
 
         if (path === '/') {
-          return renderHomePage(nonce);
+          return await renderHomePage(db, nonce);
         }
 
         const bountyPageMatch = path.match(/^\/bounties\/([a-f0-9-]+)$/);
