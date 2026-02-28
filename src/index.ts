@@ -232,6 +232,15 @@ function deriveAddress(pubkey: Uint8Array, header: number): string {
   return pubkeyToP2PKH(pubkey);
 }
 
+function deriveAddressForExpectedType(pubkey: Uint8Array, expectedAddress: string, fallbackHeader: number): string {
+  const normalized = expectedAddress.toLowerCase();
+  if (normalized.startsWith('bc1')) return pubkeyToBech32(pubkey);
+  if (normalized.startsWith('3')) return pubkeyToP2SH_P2WPKH(pubkey);
+  if (normalized.startsWith('1')) return pubkeyToP2PKH(pubkey);
+  // Unknown prefix: preserve previous behavior.
+  return deriveAddress(pubkey, fallbackHeader);
+}
+
 async function verifyBip137(signature: string, message: string, expectedAddress: string): Promise<string | null> {
   let sigBytes: Uint8Array;
   try {
@@ -248,26 +257,38 @@ async function verifyBip137(signature: string, message: string, expectedAddress:
 
   const r = sigBytes.slice(1, 33);
   const s = sigBytes.slice(33, 65);
-  const sig = new secp.Signature(
+  const sigBase = new secp.Signature(
     BigInt('0x' + Array.from(r, b => b.toString(16).padStart(2, '0')).join('')),
     BigInt('0x' + Array.from(s, b => b.toString(16).padStart(2, '0')).join(''))
-  ).addRecoveryBit(recoveryId);
+  );
 
   const msgHash = bitcoinMessageHash(message);
-
-  let pubkey: Uint8Array;
-  try {
-    const point = sig.recoverPublicKey(msgHash);
-    pubkey = point.toRawBytes(compressed);
-  } catch { return 'Signature recovery failed: invalid signature for this message'; }
-
-  const derivedAddress = deriveAddress(pubkey, header).toLowerCase();
   const expectedAddressNorm = expectedAddress.toLowerCase();
-  if (derivedAddress !== expectedAddressNorm) {
-    return `Signature mismatch: recovered ${derivedAddress}, expected ${expectedAddressNorm}`;
+
+  const recoveryOrder = [recoveryId, ...[0, 1, 2, 3].filter(id => id !== recoveryId)];
+  const compressionOrder = compressed ? [true, false] : [false, true];
+  let firstRecoveredAddress: string | null = null;
+  let recoveredAtLeastOne = false;
+
+  for (const rid of recoveryOrder) {
+    let point: secp.Point;
+    try {
+      point = sigBase.addRecoveryBit(rid).recoverPublicKey(msgHash);
+      recoveredAtLeastOne = true;
+    } catch {
+      continue;
+    }
+
+    for (const useCompressed of compressionOrder) {
+      const pubkey = point.toRawBytes(useCompressed);
+      const derivedAddress = deriveAddressForExpectedType(pubkey, expectedAddressNorm, header).toLowerCase();
+      if (firstRecoveredAddress === null) firstRecoveredAddress = derivedAddress;
+      if (derivedAddress === expectedAddressNorm) return null;
+    }
   }
 
-  return null;
+  if (!recoveredAtLeastOne) return 'Signature recovery failed: invalid signature for this message';
+  return `Signature mismatch: recovered ${firstRecoveredAddress ?? 'unknown'}, expected ${expectedAddressNorm}`;
 }
 
 // ─── BIP-322 Signature Verification (P2WPKH / bc1q) ─────────────────────────
