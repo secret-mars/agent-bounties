@@ -3,12 +3,27 @@
 // Payment is direct sBTC transfer, verified on-chain via Hiro API.
 
 import * as secp from '@noble/secp256k1';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha256';
 import { ripemd160 } from '@noble/hashes/ripemd160';
+import {
+  Transaction,
+  RawTx,
+  RawWitness,
+  p2wpkh,
+  p2pkh,
+  Script,
+  SigHash,
+  NETWORK as BTC_NETWORK,
+} from '@scure/btc-signer';
 
 interface Env {
   DB: D1Database;
 }
+
+// ─── Admin ───────────────────────────────────────────────────────────────────
+
+const ADMIN_BTC_ADDRESS = 'bc1qqaxq5vxszt0lzmr9gskv4lcx7jzrg772s4vxpp';
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
 
@@ -256,6 +271,8 @@ async function verifyBip137(signature: string, message: string, expectedAddress:
 }
 
 // ─── BIP-322 Signature Verification (P2WPKH / bc1q) ─────────────────────────
+// Uses @scure/btc-signer for transaction construction and sighash computation,
+// matching the reference implementation at aibtcdev-landing-page/lib/bitcoin-verify.ts
 
 function concatBytes(...arrays: Uint8Array[]): Uint8Array {
   const totalLen = arrays.reduce((sum, a) => sum + a.length, 0);
@@ -265,157 +282,132 @@ function concatBytes(...arrays: Uint8Array[]): Uint8Array {
   return result;
 }
 
-function writeU32LE(value: number): Uint8Array {
-  const buf = new Uint8Array(4);
-  buf[0] = value & 0xff; buf[1] = (value >> 8) & 0xff;
-  buf[2] = (value >> 16) & 0xff; buf[3] = (value >> 24) & 0xff;
-  return buf;
-}
-
-function writeU64LE(value: number): Uint8Array {
-  const buf = new Uint8Array(8);
-  buf[0] = value & 0xff; buf[1] = (value >> 8) & 0xff;
-  buf[2] = (value >> 16) & 0xff; buf[3] = (value >> 24) & 0xff;
-  return buf;
-}
-
 function encodeVarInt(n: number): Uint8Array {
   if (n < 0xfd) return new Uint8Array([n]);
   if (n <= 0xffff) return new Uint8Array([0xfd, n & 0xff, (n >> 8) & 0xff]);
   return new Uint8Array([0xfe, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]);
 }
 
-function bip322TaggedHash(tag: string, message: Uint8Array): Uint8Array {
-  const tagHash = sha256(new TextEncoder().encode(tag));
-  // AIBTC MCP server uses varint(len) || msg format in the tagged hash
-  const varint = encodeVarInt(message.length);
-  return sha256(concatBytes(tagHash, tagHash, varint, message));
+function doubleSha256(data: Uint8Array): Uint8Array {
+  return sha256(sha256(data));
+}
+
+/**
+ * Convert DER-encoded ECDSA signature to compact (64-byte r||s) format.
+ * Strips leading 0x00 padding and left-pads to 32 bytes each.
+ */
+function parseDERSignature(der: Uint8Array): Uint8Array {
+  if (der[0] !== 0x30) throw new Error('parseDERSignature: expected 0x30 header');
+  let pos = 2;
+  if (der[pos] !== 0x02) throw new Error('parseDERSignature: expected 0x02 for r');
+  pos++;
+  const rLen = der[pos++];
+  const rRaw = der.slice(pos, pos + rLen);
+  pos += rLen;
+  if (der[pos] !== 0x02) throw new Error('parseDERSignature: expected 0x02 for s');
+  pos++;
+  const sLen = der[pos++];
+  const sRaw = der.slice(pos, pos + sLen);
+
+  // Strip leading 0x00 padding (added when high bit is set to keep integer positive)
+  const rBytes = rRaw[0] === 0x00 ? rRaw.slice(1) : rRaw;
+  const sBytes = sRaw[0] === 0x00 ? sRaw.slice(1) : sRaw;
+
+  const compact = new Uint8Array(64);
+  compact.set(rBytes, 32 - rBytes.length); // left-pad r
+  compact.set(sBytes, 64 - sBytes.length); // left-pad s
+  return compact;
+}
+
+/**
+ * BIP-322 tagged hash: SHA256(SHA256(tag) || SHA256(tag) || varint(msg.len) || msg)
+ */
+function bip322TaggedHash(message: string): Uint8Array {
+  const tagHash = sha256(new TextEncoder().encode('BIP0322-signed-message'));
+  const msgBytes = new TextEncoder().encode(message);
+  const varint = encodeVarInt(msgBytes.length);
+  return sha256(concatBytes(tagHash, tagHash, varint, msgBytes));
+}
+
+/**
+ * Build BIP-322 to_spend virtual transaction and return its txid.
+ * Uses RawTx.encode() from @scure/btc-signer for correct serialization.
+ */
+function bip322BuildToSpendTxId(message: string, scriptPubKey: Uint8Array): Uint8Array {
+  const msgHash = bip322TaggedHash(message);
+  const scriptSig = concatBytes(new Uint8Array([0x00, 0x20]), msgHash);
+
+  const rawTx = RawTx.encode({
+    version: 0,
+    inputs: [{
+      txid: new Uint8Array(32),
+      index: 0xffffffff,
+      finalScriptSig: scriptSig,
+      sequence: 0,
+    }],
+    outputs: [{
+      amount: BigInt(0),
+      script: scriptPubKey,
+    }],
+    lockTime: 0,
+  });
+
+  // txid = doubleSHA256 in reversed byte order (display format, expected by btc-signer)
+  return doubleSha256(rawTx).reverse();
 }
 
 async function verifyBip322P2WPKH(signatureB64: string, message: string, expectedAddress: string): Promise<string | null> {
-  let witnessBytes: Uint8Array;
+  let sigBytes: Uint8Array;
   try {
-    witnessBytes = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
+    sigBytes = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
   } catch { return 'Invalid BIP-322 signature: not valid base64'; }
 
-  if (witnessBytes.length < 3) return 'BIP-322 witness too short';
+  // Decode witness stack using @scure/btc-signer
+  let witnessItems: Uint8Array[];
+  try {
+    witnessItems = RawWitness.decode(sigBytes);
+  } catch { return 'Invalid BIP-322 witness encoding'; }
 
-  // Parse witness: num_items, then for each: length + data
-  let off = 0;
-  const numItems = witnessBytes[off++];
-  if (numItems !== 2) return `Expected 2 witness items (P2WPKH), got ${numItems}`;
+  if (witnessItems.length !== 2) return `Expected 2 witness items (P2WPKH), got ${witnessItems.length}`;
 
-  const sigLen = witnessBytes[off++];
-  if (off + sigLen > witnessBytes.length) return 'BIP-322 witness truncated at signature';
-  const derSigWithHashType = witnessBytes.slice(off, off + sigLen);
-  off += sigLen;
+  const ecdsaSigWithHashtype = witnessItems[0];
+  const pubkeyBytes = witnessItems[1];
 
-  const pubkeyLen = witnessBytes[off++];
-  if (off + pubkeyLen > witnessBytes.length) return 'BIP-322 witness truncated at pubkey';
-  const pubkey = witnessBytes.slice(off, off + pubkeyLen);
+  if (pubkeyBytes.length !== 33) return `Expected 33-byte compressed pubkey, got ${pubkeyBytes.length}`;
 
-  if (pubkeyLen !== 33) return `Expected 33-byte compressed pubkey, got ${pubkeyLen}`;
+  // Derive scriptPubKey and address from witness pubkey
+  const p2wpkhResult = p2wpkh(pubkeyBytes, BTC_NETWORK);
+  const scriptPubKey = p2wpkhResult.script;
+  const derivedAddress = p2wpkhResult.address;
 
-  // Verify pubkey derives to expected bc1q address
-  const derivedAddress = pubkeyToBech32(pubkey);
-  if (derivedAddress.toLowerCase() !== expectedAddress.toLowerCase()) {
+  if (derivedAddress?.toLowerCase() !== expectedAddress.toLowerCase()) {
     return `BIP-322 pubkey mismatch: derived ${derivedAddress}, expected ${expectedAddress}`;
   }
 
-  // Strip SIGHASH_ALL byte from DER signature
-  const hashType = derSigWithHashType[derSigWithHashType.length - 1];
-  if (hashType !== 0x01) return `Unexpected sighash type: ${hashType}`;
-  const derSig = derSigWithHashType.slice(0, -1);
+  // Build to_spend txid
+  const toSpendTxid = bip322BuildToSpendTxId(message, scriptPubKey);
 
-  // Parse DER: 0x30 <len> 0x02 <rlen> <r> 0x02 <slen> <s>
-  if (derSig[0] !== 0x30) return 'Invalid DER: missing SEQUENCE';
-  let d = 2;
-  if (derSig[d] !== 0x02) return 'Invalid DER: missing INTEGER for r';
-  d++;
-  const rLen = derSig[d++];
-  const rBytes = derSig.slice(d, d + rLen); d += rLen;
-  if (derSig[d] !== 0x02) return 'Invalid DER: missing INTEGER for s';
-  d++;
-  const sLen = derSig[d++];
-  const sBytes = derSig.slice(d, d + sLen);
+  // Build (unsigned) to_sign transaction for sighash computation
+  const toSignTx = new Transaction({ version: 0, lockTime: 0, allowUnknownOutputs: true });
+  toSignTx.addInput({
+    txid: toSpendTxid,
+    index: 0,
+    sequence: 0,
+    witnessUtxo: { amount: BigInt(0), script: scriptPubKey },
+  });
+  toSignTx.addOutput({ script: Script.encode(['RETURN']), amount: BigInt(0) });
 
-  const rHex = Array.from(rBytes, b => b.toString(16).padStart(2, '0')).join('');
-  const sHex = Array.from(sBytes, b => b.toString(16).padStart(2, '0')).join('');
+  // Compute BIP143 witness-v0 sighash using btc-signer
+  const scriptCode = p2pkh(pubkeyBytes).script;
+  const sighash = toSignTx.preimageWitnessV0(0, scriptCode, SigHash.ALL, BigInt(0));
 
-  // ── Construct BIP-322 sighash ──
+  // Strip hashtype byte, convert DER to compact format
+  const derSig = ecdsaSigWithHashtype.slice(0, -1);
+  const compactSig = parseDERSignature(derSig);
 
-  // Message hash (tagged)
-  const messageBytes = new TextEncoder().encode(message);
-  const messageHash = bip322TaggedHash('BIP0322-signed-message', messageBytes);
-
-  // P2WPKH scriptPubKey for the output of to_spend
-  const pubkeyHash = ripemd160(sha256(pubkey));
-  const scriptPubKey = new Uint8Array(22);
-  scriptPubKey[0] = 0x00; scriptPubKey[1] = 0x14;
-  scriptPubKey.set(pubkeyHash, 2);
-
-  // to_spend scriptSig: OP_0 OP_PUSH32(messageHash)
-  const toSpendScriptSig = new Uint8Array(34);
-  toSpendScriptSig[0] = 0x00; toSpendScriptSig[1] = 0x20;
-  toSpendScriptSig.set(messageHash, 2);
-
-  // Serialize to_spend tx (non-segwit, for txid computation)
-  const toSpend = concatBytes(
-    writeU32LE(0),                                           // version = 0
-    new Uint8Array([0x01]),                                  // 1 input
-    new Uint8Array(32),                                      // prevout txid = 0x00...
-    new Uint8Array([0xff, 0xff, 0xff, 0xff]),                // prevout vout = 0xFFFFFFFF
-    new Uint8Array([toSpendScriptSig.length]),               // scriptSig length
-    toSpendScriptSig,                                        // scriptSig
-    writeU32LE(0),                                           // sequence = 0
-    new Uint8Array([0x01]),                                  // 1 output
-    writeU64LE(0),                                           // value = 0
-    new Uint8Array([scriptPubKey.length]),                    // scriptPubKey length
-    scriptPubKey,                                             // scriptPubKey
-    writeU32LE(0)                                            // locktime = 0
-  );
-
-  const toSpendTxid = sha256(sha256(toSpend));
-
-  // BIP-143 sighash for to_sign
-  const outpoint = new Uint8Array(36);
-  outpoint.set(toSpendTxid, 0); // vout = 0 (already zeroed)
-
-  const hashPrevouts = sha256(sha256(outpoint));
-  const hashSequence = sha256(sha256(writeU32LE(0)));
-
-  // Output: value=0, scriptPubKey=OP_RETURN (0x6a)
-  const outputSerialized = concatBytes(writeU64LE(0), new Uint8Array([0x01, 0x6a]));
-  const hashOutputs = sha256(sha256(outputSerialized));
-
-  // scriptCode for P2WPKH: OP_DUP OP_HASH160 <20> OP_EQUALVERIFY OP_CHECKSIG
-  const scriptCode = new Uint8Array(25);
-  scriptCode[0] = 0x76; scriptCode[1] = 0xa9; scriptCode[2] = 0x14;
-  scriptCode.set(pubkeyHash, 3);
-  scriptCode[23] = 0x88; scriptCode[24] = 0xac;
-
-  const preimage = concatBytes(
-    writeU32LE(0),                     // version = 0
-    hashPrevouts,
-    hashSequence,
-    outpoint,                          // 36 bytes
-    new Uint8Array([scriptCode.length]),
-    scriptCode,
-    writeU64LE(0),                     // value = 0
-    writeU32LE(0),                     // sequence = 0
-    hashOutputs,
-    writeU32LE(0),                     // locktime = 0
-    writeU32LE(0x01)                   // SIGHASH_ALL
-  );
-
-  const sighash = sha256(sha256(preimage));
-
-  // Verify ECDSA
-  const sig = new secp.Signature(BigInt('0x' + rHex), BigInt('0x' + sHex));
-  const valid = secp.verify(sig, sighash, pubkey);
-  if (!valid) {
-    return 'BIP-322 ECDSA verification failed';
-  }
+  // Verify ECDSA using @noble/curves (matches btc-signer internals)
+  const valid = secp256k1.verify(compactSig, sighash, pubkeyBytes, { prehash: false });
+  if (!valid) return 'BIP-322 ECDSA verification failed';
 
   return null; // verified
 }
@@ -1579,10 +1571,13 @@ async function handleUpdateBounty(id: string, body: any, db: D1Database, corsOri
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Can only update open bounties' }, 409, corsOrigin);
 
-  // Verify creator - match via BTC address lookup
-  const creator = await db.prepare('SELECT btc_address FROM agents WHERE stx_address = ?').bind(bounty.creator_stx).first<{ btc_address: string }>();
-  if (!creator || creator.btc_address !== auth.btcAddress) {
-    return json({ error: 'Only the bounty creator can update it' }, 403, corsOrigin);
+  // Admin or creator only
+  const isAdmin = auth.btcAddress === ADMIN_BTC_ADDRESS;
+  if (!isAdmin) {
+    const creator = await db.prepare('SELECT btc_address FROM agents WHERE stx_address = ?').bind(bounty.creator_stx).first<{ btc_address: string }>();
+    if (!creator || creator.btc_address !== auth.btcAddress) {
+      return json({ error: 'Only the admin or bounty creator can update it' }, 403, corsOrigin);
+    }
   }
 
   // Apply updates
@@ -1634,9 +1629,13 @@ async function handleCancelBounty(id: string, body: any, db: D1Database, corsOri
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'open') return json({ error: 'Can only cancel open bounties' }, 409, corsOrigin);
 
-  const creator = await db.prepare('SELECT btc_address FROM agents WHERE stx_address = ?').bind(bounty.creator_stx).first<{ btc_address: string }>();
-  if (!creator || creator.btc_address !== auth.btcAddress) {
-    return json({ error: 'Only the bounty creator can cancel it' }, 403, corsOrigin);
+  // Admin or creator only
+  const isAdmin = auth.btcAddress === ADMIN_BTC_ADDRESS;
+  if (!isAdmin) {
+    const creator = await db.prepare('SELECT btc_address FROM agents WHERE stx_address = ?').bind(bounty.creator_stx).first<{ btc_address: string }>();
+    if (!creator || creator.btc_address !== auth.btcAddress) {
+      return json({ error: 'Only the admin or bounty creator can cancel it' }, 403, corsOrigin);
+    }
   }
 
   await dbRun(db
@@ -1762,10 +1761,13 @@ async function handleReview(id: string, body: any, db: D1Database, corsOrigin: s
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'submitted') return json({ error: 'Bounty must be in submitted status' }, 409, corsOrigin);
 
-  // Creator only
-  const creator = await db.prepare('SELECT btc_address FROM agents WHERE stx_address = ?').bind(bounty.creator_stx).first<{ btc_address: string }>();
-  if (!creator || creator.btc_address !== auth.btcAddress) {
-    return json({ error: 'Only the bounty creator can review submissions' }, 403, corsOrigin);
+  // Admin or creator only
+  const isAdmin = auth.btcAddress === ADMIN_BTC_ADDRESS;
+  if (!isAdmin) {
+    const creator = await db.prepare('SELECT btc_address FROM agents WHERE stx_address = ?').bind(bounty.creator_stx).first<{ btc_address: string }>();
+    if (!creator || creator.btc_address !== auth.btcAddress) {
+      return json({ error: 'Only the admin or bounty creator can review submissions' }, 403, corsOrigin);
+    }
   }
 
   if (!body.verdict || !['approve', 'reject'].includes(body.verdict)) {
@@ -1828,10 +1830,13 @@ async function handlePay(id: string, body: any, db: D1Database, corsOrigin: stri
   if ('error' in auth) return json({ error: auth.error }, 401, corsOrigin);
   if (bounty.status !== 'approved') return json({ error: 'Bounty must be in approved status' }, 409, corsOrigin);
 
-  // Creator only
-  const creator = await db.prepare('SELECT btc_address, stx_address FROM agents WHERE stx_address = ?').bind(bounty.creator_stx).first<{ btc_address: string; stx_address: string }>();
-  if (!creator || creator.btc_address !== auth.btcAddress) {
-    return json({ error: 'Only the bounty creator can submit payment' }, 403, corsOrigin);
+  // Admin or creator only
+  const isAdmin = auth.btcAddress === ADMIN_BTC_ADDRESS;
+  if (!isAdmin) {
+    const creator = await db.prepare('SELECT btc_address, stx_address FROM agents WHERE stx_address = ?').bind(bounty.creator_stx).first<{ btc_address: string; stx_address: string }>();
+    if (!creator || creator.btc_address !== auth.btcAddress) {
+      return json({ error: 'Only the admin or bounty creator can submit payment' }, 403, corsOrigin);
+    }
   }
 
   if (!body.tx_hash || !isValidTxHash(body.tx_hash)) {
