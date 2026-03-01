@@ -2089,7 +2089,22 @@ export default {
           return renderHomePage(nonce, url);
         }
 
-        const bountyPageMatch = path.match(/^\/bounties\/([a-f0-9-]+)$/);
+        if (path === '/bounties' || path === '/bounties/') {
+          return new Response(null, {
+            status: 301,
+            headers: { Location: '/' },
+          });
+        }
+
+        const legacyBountyPathMatch = path.match(/^\/bounty\/([a-f0-9-]+)\/?$/);
+        if (legacyBountyPathMatch) {
+          return new Response(null, {
+            status: 301,
+            headers: { Location: `/bounties/${legacyBountyPathMatch[1]}` },
+          });
+        }
+
+        const bountyPageMatch = path.match(/^\/bounties\/([a-f0-9-]+)\/?$/);
         if (bountyPageMatch) {
           return renderBountyPage(nonce, url);
         }
