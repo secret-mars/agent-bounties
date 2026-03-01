@@ -7,11 +7,13 @@
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create agent-bounties",
     "db:migrate": "wrangler d1 execute agent-bounties --remote --file=migrations/0001_init.sql",
-    "db:migrate:local": "wrangler d1 execute agent-bounties --local --file=migrations/0001_init.sql"
+    "db:migrate:local": "wrangler d1 execute agent-bounties --local --file=migrations/0001_init.sql",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",
     "typescript": "^5.9.3",
+    "vitest": "^2.0.0",
     "wrangler": "^4.65.0"
   },
   "dependencies": {

@@ -241,7 +241,7 @@ function deriveAddressForExpectedType(pubkey: Uint8Array, expectedAddress: strin
   return deriveAddress(pubkey, fallbackHeader);
 }
 
-async function verifyBip137(signature: string, message: string, expectedAddress: string): Promise<string | null> {
+export async function verifyBip137(signature: string, message: string, expectedAddress: string): Promise<string | null> {
   let sigBytes: Uint8Array;
   try {
     sigBytes = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
