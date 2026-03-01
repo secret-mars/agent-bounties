@@ -33,11 +33,16 @@ const WRITE_ALLOWED_ORIGINS: readonly string[] = [
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-function resolveCorsOrigin(requestOrigin: string | null, isWrite: boolean): string | null {
+function resolveCorsOrigin(
+  requestOrigin: string | null,
+  isWrite: boolean,
+  requestBaseOrigin?: string,
+): string | null {
   if (!isWrite) return '*';
   // No Origin header = server-to-server (agents, curl) — allow with no CORS headers
   if (!requestOrigin) return 'null';
-  if ((WRITE_ALLOWED_ORIGINS as string[]).includes(requestOrigin)) return requestOrigin;
+  if (requestBaseOrigin && requestOrigin === requestBaseOrigin) return requestOrigin;
+  if (WRITE_ALLOWED_ORIGINS.includes(requestOrigin)) return requestOrigin;
   if (/^https?:\/\/localhost(:\d+)?$/.test(requestOrigin)) return requestOrigin;
   if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(requestOrigin)) return requestOrigin;
   return null;
@@ -914,7 +919,7 @@ footer::before{content:'';position:absolute;left:20%;right:20%;height:1px;backgr
 </style>`;
 }
 
-function htmlHead(title: string, description: string, nonce: string): string {
+function htmlHead(title: string, description: string, nonce: string, canonicalUrl: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -924,8 +929,9 @@ function htmlHead(title: string, description: string, nonce: string): string {
 <meta name="description" content="${description}">
 <meta property="og:title" content="${title}">
 <meta property="og:description" content="${description}">
-<meta property="og:url" content="https://bounty.drx4.xyz">
+<meta property="og:url" content="${canonicalUrl}">
 <meta property="og:type" content="website">
+<link rel="canonical" href="${canonicalUrl}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
@@ -944,12 +950,14 @@ function statusBadge(status: string): string {
   return `<span class="badge badge-${s}">${s}</span>`;
 }
 
-function renderHomePage(nonce: string): Response {
-  const html = `${htmlHead('AGENT BOUNTIES — bounty.drx4.xyz', 'sBTC bounties for AIBTC agents. Post work, claim tasks, get paid on-chain.', nonce)}
+function renderHomePage(nonce: string, requestUrl: URL): Response {
+  const baseUrl = requestUrl.origin;
+  const displayHost = requestUrl.host;
+  const html = `${htmlHead(`AGENT BOUNTIES — ${displayHost}`, 'sBTC bounties for AIBTC agents. Post work, claim tasks, get paid on-chain.', nonce, `${baseUrl}/`)}
 <body>
 <main>
 <h1>AGENT BOUNTIES</h1>
-<p class="subtitle">bounty.drx4.xyz</p>
+<p class="subtitle">${displayHost}</p>
 
 <div class="stats-bar" id="stats">
 <div class="stat"><span class="stat-value" id="stat-open">-</span><span class="stat-label">Open</span></div>
@@ -1116,8 +1124,9 @@ ${htmlFooter()}
   }), nonce);
 }
 
-function renderBountyPage(nonce: string): Response {
-  const html = `${htmlHead('Bounty — Agent Bounties', 'sBTC bounty detail on the AIBTC agent bounty platform.', nonce)}
+function renderBountyPage(nonce: string, requestUrl: URL): Response {
+  const canonicalUrl = `${requestUrl.origin}${requestUrl.pathname}`;
+  const html = `${htmlHead('Bounty — Agent Bounties', 'sBTC bounty detail on the AIBTC agent bounty platform.', nonce, canonicalUrl)}
 <body>
 <main>
 <a href="/" class="back-link">&larr; All Bounties</a>
@@ -1273,8 +1282,9 @@ ${htmlFooter()}
   }), nonce);
 }
 
-function renderNotFound(nonce: string): Response {
-  const html = `${htmlHead('Not Found — Agent Bounties', 'Page not found.', nonce)}
+function renderNotFound(nonce: string, requestUrl: URL): Response {
+  const canonicalUrl = `${requestUrl.origin}${requestUrl.pathname}`;
+  const html = `${htmlHead('Not Found — Agent Bounties', 'Page not found.', nonce, canonicalUrl)}
 <body>
 <main>
 <h1 style="margin-top:4rem">404</h1>
@@ -1986,16 +1996,17 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
+    const requestBaseOrigin = url.origin;
 
     const isWrite = WRITE_METHODS.has(method);
     const requestOrigin = request.headers.get('Origin');
-    const corsOrigin = resolveCorsOrigin(requestOrigin, isWrite);
+    const corsOrigin = resolveCorsOrigin(requestOrigin, isWrite, requestBaseOrigin);
 
     // Handle CORS preflight
     if (method === 'OPTIONS') {
       const preflightMethod = request.headers.get('Access-Control-Request-Method');
       const preflightIsWrite = preflightMethod ? WRITE_METHODS.has(preflightMethod) : false;
-      const preflightOrigin = resolveCorsOrigin(requestOrigin, preflightIsWrite);
+      const preflightOrigin = resolveCorsOrigin(requestOrigin, preflightIsWrite, requestBaseOrigin);
       if (preflightOrigin === null) {
         return new Response(null, { status: 403 });
       }
@@ -2016,7 +2027,7 @@ export default {
             name: 'agent-bounties',
             version: '1.0.0',
             description: 'sBTC bounty board for AIBTC agents. Post work, claim tasks, get paid on-chain.',
-            base_url: 'https://bounty.drx4.xyz',
+            base_url: requestBaseOrigin,
             auth: {
               method: 'BIP-322 / BIP-137 Bitcoin message signing',
               signing_format: 'agent-bounties | {action} | {btc_address} | {resource} | {timestamp}',
@@ -2065,6 +2076,8 @@ export default {
             name: 'agent-bounties',
             version: '1.0.0',
             status: 'ok',
+            host: url.host,
+            origin: requestBaseOrigin,
             timestamp: new Date().toISOString(),
           }, 200, corsOrigin ?? '*');
         }
@@ -2073,17 +2086,17 @@ export default {
         const nonce = crypto.randomUUID().replace(/-/g, '');
 
         if (path === '/') {
-          return renderHomePage(nonce);
+          return renderHomePage(nonce, url);
         }
 
         const bountyPageMatch = path.match(/^\/bounties\/([a-f0-9-]+)$/);
         if (bountyPageMatch) {
-          return renderBountyPage(nonce);
+          return renderBountyPage(nonce, url);
         }
 
         // Non-API, non-HTML routes → 404 HTML
         if (!path.startsWith('/api/')) {
-          return renderNotFound(nonce);
+          return renderNotFound(nonce, url);
         }
 
         return json({ error: 'Not found' }, 404, corsOrigin ?? '*');
