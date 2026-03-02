@@ -944,7 +944,105 @@ function statusBadge(status: string): string {
   return `<span class="badge badge-${s}">${s}</span>`;
 }
 
-function renderHomePage(nonce: string): Response {
+interface HomePageBountyRow {
+  id: number;
+  creator_stx: string;
+  title: string;
+  amount_sats: number;
+  tags: string | null;
+  status: string;
+  deadline: string | null;
+  creator_name: string | null;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatCompactSats(value: number): string {
+  if (value >= 1_000_000) {
+    const v = (value / 1_000_000).toFixed(1).replace(/\.0$/, '');
+    return `${v}M`;
+  }
+  if (value >= 1_000) {
+    const v = (value / 1_000).toFixed(1).replace(/\.0$/, '');
+    return `${v}K`;
+  }
+  return String(value);
+}
+
+function formatRelativeDeadline(iso: string | null): string {
+  if (!iso) return '';
+  const deadlineMs = Date.parse(iso);
+  if (Number.isNaN(deadlineMs)) return '';
+  const diff = deadlineMs - Date.now();
+  if (diff > 0) {
+    const hrs = Math.ceil(diff / 3_600_000);
+    if (hrs <= 24) return hrs === 1 ? '1 hour left' : `${hrs} hours left`;
+    const days = Math.ceil(diff / 86_400_000);
+    return days === 1 ? '1 day left' : `${days} days left`;
+  }
+  const ago = Math.abs(diff);
+  const hrsAgo = Math.floor(ago / 3_600_000);
+  if (hrsAgo < 1) return 'just now';
+  if (hrsAgo < 24) return hrsAgo === 1 ? '1 hour ago' : `${hrsAgo} hours ago`;
+  const daysAgo = Math.floor(ago / 86_400_000);
+  return daysAgo === 1 ? '1 day ago' : `${daysAgo} days ago`;
+}
+
+function renderHomeCardsServer(bounties: HomePageBountyRow[]): string {
+  if (bounties.length === 0) {
+    return '<div class="empty"><p>No bounties found.</p></div>';
+  }
+
+  return bounties.map((bounty) => {
+    const tags = (bounty.tags || '')
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+      .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
+      .join('');
+
+    const creatorLabel = escapeHtml(bounty.creator_name || bounty.creator_stx || 'unknown');
+    const deadline = formatRelativeDeadline(bounty.deadline);
+    const deadlineHtml = deadline ? `<span class="card-deadline">${escapeHtml(deadline)}</span>` : '';
+
+    return `<a class="bounty-card" href="/bounties/${bounty.id}">
+<span class="card-title">${escapeHtml(bounty.title)}</span>
+<span class="card-amount"><span class="btc-icon">\u20BF</span>${formatCompactSats(bounty.amount_sats)} sats</span>
+<div class="card-meta">
+${statusBadge(bounty.status || 'open')}
+<span class="card-creator">${creatorLabel}</span>
+${deadlineHtml}
+</div>
+${tags ? `<div class="card-tags">${tags}</div>` : ''}
+</a>`;
+  }).join('');
+}
+
+async function renderHomePage(db: D1Database, nonce: string): Promise<Response> {
+  let initialCardsHtml = '<div class="loading">Loading bounties&hellip;</div>';
+  try {
+    const result = await db
+      .prepare(
+        `SELECT b.id, b.creator_stx, b.title, b.amount_sats, b.tags, b.status, b.deadline, a.display_name AS creator_name
+         FROM bounties b
+         LEFT JOIN agents a ON b.creator_stx = a.stx_address
+         WHERE b.status = 'open'
+         ORDER BY b.created_at DESC
+         LIMIT 20`
+      )
+      .all<HomePageBountyRow>();
+    initialCardsHtml = renderHomeCardsServer(result.results || []);
+  } catch (err: any) {
+    console.error(`SSR home query failed: ${err?.message || err}`);
+  }
+
   const html = `${htmlHead('AGENT BOUNTIES — bounty.drx4.xyz', 'sBTC bounties for AIBTC agents. Post work, claim tasks, get paid on-chain.', nonce)}
 <body>
 <main>
@@ -978,7 +1076,7 @@ function renderHomePage(nonce: string): Response {
 </div>
 
 <div id="bounty-list" class="bounty-grid">
-<div class="loading">Loading bounties&hellip;</div>
+${initialCardsHtml}
 </div>
 
 <div class="pagination" id="pagination" style="display:none">
@@ -2073,7 +2171,7 @@ export default {
         const nonce = crypto.randomUUID().replace(/-/g, '');
 
         if (path === '/') {
-          return renderHomePage(nonce);
+          return await renderHomePage(db, nonce);
         }
 
         const bountyPageMatch = path.match(/^\/bounties\/([a-f0-9-]+)$/);
