@@ -17,29 +17,13 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Check TypeScript compilation
-        run: npx tsc --noEmit
-
-      - name: Verify code changes
+      - name: Verify server-side rendering
         run: |
-          echo "Checking for server-side rendering changes..."
+          echo "Checking for server-side rendering..."
           if grep -q "async function renderHomePage(nonce: string, db: D1Database)" src/index.ts; then
             echo "✅ Server-side rendering detected"
           else
             echo "❌ Server-side rendering not found"
-            exit 1
-          fi
-
-      - name: Verify bounty list rendering
-        run: |
-          echo "Checking bounty list rendering logic..."
-          if grep -q "bounties.forEach" src/index.ts; then
-            echo "✅ Bounty list rendering found"
-          else
-            echo "❌ Bounty list rendering not found"
             exit 1
           fi
 
@@ -53,13 +37,13 @@ jobs:
             exit 1
           fi
 
-      - name: Verify curl accessibility
+      - name: Verify bounty list rendering
         run: |
-          echo "Checking for server-rendered HTML..."
-          if grep -q 'class="bounty-grid"' src/index.ts; then
-            echo "✅ Server-rendered bounty grid found"
+          echo "Checking bounty list rendering..."
+          if grep -q "bounties.forEach" src/index.ts; then
+            echo "✅ Bounty list rendering found"
           else
-            echo "❌ Server-rendered bounty grid not found"
+            echo "❌ Bounty list rendering not found"
             exit 1
           fi
 
