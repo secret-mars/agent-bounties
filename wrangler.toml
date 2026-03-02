@@ -2,6 +2,7 @@ name = "agent-bounties"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 account_id = "6a0bf22a5ff120f19789f29eb4196ce2"
+workers_dev = true
 
 routes = [
   { pattern = "bounty.drx4.xyz", custom_domain = true }
