@@ -944,7 +944,67 @@ function statusBadge(status: string): string {
   return `<span class="badge badge-${s}">${s}</span>`;
 }
 
-function renderHomePage(nonce: string): Response {
+function escapeHtmlServer(s: string | null | undefined): string {
+  if (!s) return '';
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatSatsServer(n: number): string {
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(n);
+}
+
+async function renderHomePage(db: D1Database, nonce: string): Promise<Response> {
+  // Query open bounties server-side so curl/agents/SEO see real content
+  let ssrCards = '';
+  try {
+    const result = await db
+      .prepare(
+        `SELECT b.*, a.display_name as creator_name
+         FROM bounties b
+         LEFT JOIN agents a ON b.creator_stx = a.stx_address
+         WHERE b.status = 'open'
+         ORDER BY b.created_at DESC
+         LIMIT 20`
+      )
+      .all();
+
+    if (result.results && result.results.length > 0) {
+      ssrCards = (result.results as any[])
+        .map((b) => {
+          const tags = b.tags
+            ? (b.tags as string)
+                .split(',')
+                .map((t: string) => t.trim())
+                .filter(Boolean)
+                .map((t: string) => `<span class="tag">${escapeHtmlServer(t)}</span>`)
+                .join('')
+            : '';
+          const creatorLabel = escapeHtmlServer(b.creator_name || b.creator_stx || 'Anonymous');
+          return `<a class="bounty-card" href="/bounties/${escapeHtmlServer(b.uuid || String(b.id))}">`
+            + `<span class="card-title">${escapeHtmlServer(b.title)}</span>`
+            + `<span class="card-amount"><span class="btc-icon">\u20BF</span>${formatSatsServer(Number(b.amount_sats))} sats</span>`
+            + `<div class="card-meta">`
+            + `${statusBadge(b.status)}`
+            + `<span class="card-creator">${creatorLabel}</span>`
+            + `</div>`
+            + (tags ? `<div class="card-tags">${tags}</div>` : '')
+            + `</a>`;
+        })
+        .join('');
+    } else {
+      ssrCards = '<div class="empty"><p>No open bounties yet.</p></div>';
+    }
+  } catch (_) {
+    // If D1 query fails, fall back to the client-side loading placeholder
+    ssrCards = '<div class="loading">Loading bounties&hellip;</div>';
+  }
+
   const html = `${htmlHead('AGENT BOUNTIES — bounty.drx4.xyz', 'sBTC bounties for AIBTC agents. Post work, claim tasks, get paid on-chain.', nonce)}
 <body>
 <main>
@@ -978,7 +1038,7 @@ function renderHomePage(nonce: string): Response {
 </div>
 
 <div id="bounty-list" class="bounty-grid">
-<div class="loading">Loading bounties&hellip;</div>
+${ssrCards}
 </div>
 
 <div class="pagination" id="pagination" style="display:none">
@@ -2073,7 +2133,7 @@ export default {
         const nonce = crypto.randomUUID().replace(/-/g, '');
 
         if (path === '/') {
-          return renderHomePage(nonce);
+          return renderHomePage(db, nonce);
         }
 
         const bountyPageMatch = path.match(/^\/bounties\/([a-f0-9-]+)$/);
