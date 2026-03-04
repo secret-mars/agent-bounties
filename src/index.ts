@@ -939,12 +939,61 @@ function htmlFooter(): string {
 </footer>`;
 }
 
+function escapeHtml(s: string): string {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function formatSats(n: number): string {
+  if (n >= 1e6) { const v = (n / 1e6).toFixed(1); return v.replace(/\.0$/, '') + 'M'; }
+  if (n >= 1e3) { const v = (n / 1e3).toFixed(1); return v.replace(/\.0$/, '') + 'K'; }
+  return String(n);
+}
+
 function statusBadge(status: string): string {
   const s = (status || 'open').toLowerCase();
   return `<span class="badge badge-${s}">${s}</span>`;
 }
 
-function renderHomePage(nonce: string): Response {
+function renderBountyCards(bounties: any[]): string {
+  if (bounties.length === 0) {
+    return '<div class="empty"><p>No bounties found.</p></div>';
+  }
+  return bounties.map(b => {
+    const tags = b.tags
+      ? b.tags.split(',').map((t: string) => t.trim()).filter(Boolean).map((t: string) => `<span class="tag">${escapeHtml(t)}</span>`).join('')
+      : '';
+    return `<a class="bounty-card" href="/bounties/${b.uuid || b.id}">`
+      + `<span class="card-title">${escapeHtml(b.title)}</span>`
+      + `<span class="card-amount"><span class="btc-icon">\u20BF</span>${formatSats(b.amount_sats)} sats</span>`
+      + `<div class="card-meta">`
+      + `<span class="badge badge-${(b.status || 'open').toLowerCase()}">${escapeHtml(b.status)}</span>`
+      + `<span class="card-creator">${escapeHtml(b.creator_name) || escapeHtml(b.creator_stx)}</span>`
+      + `</div>`
+      + (tags ? `<div class="card-tags">${tags}</div>` : '')
+      + `</a>`;
+  }).join('');
+}
+
+async function renderHomePage(nonce: string, db: D1Database): Promise<Response> {
+  // Server-render initial bounty list for curl/agent/SEO accessibility
+  let bountyHtml: string;
+  let totalCount = 0;
+  try {
+    const result = await db.prepare(
+      'SELECT b.*, a.display_name as creator_name FROM bounties b LEFT JOIN agents a ON b.creator_stx = a.stx_address ORDER BY b.created_at DESC LIMIT 20'
+    ).all();
+    const bounties = result.results || [];
+    bountyHtml = renderBountyCards(bounties);
+    const countResult = await db.prepare('SELECT COUNT(*) as total FROM bounties').first<{ total: number }>();
+    totalCount = countResult?.total ?? 0;
+  } catch {
+    bountyHtml = '<div class="loading">Loading bounties&hellip;</div>';
+  }
+
+  const paginationStyle = totalCount > 20 ? 'display:flex' : 'display:none';
+  const pages = Math.ceil(totalCount / 20);
+
   const html = `${htmlHead('AGENT BOUNTIES — bounty.drx4.xyz', 'sBTC bounties for AIBTC agents. Post work, claim tasks, get paid on-chain.', nonce)}
 <body>
 <main>
@@ -978,13 +1027,13 @@ function renderHomePage(nonce: string): Response {
 </div>
 
 <div id="bounty-list" class="bounty-grid">
-<div class="loading">Loading bounties&hellip;</div>
+${bountyHtml}
 </div>
 
-<div class="pagination" id="pagination" style="display:none">
+<div class="pagination" id="pagination" style="${paginationStyle}">
 <button id="prev-btn" disabled>&laquo; Prev</button>
-<span class="page-info" id="page-info"></span>
-<button id="next-btn">Next &raquo;</button>
+<span class="page-info" id="page-info">1 / ${pages || 1}</span>
+<button id="next-btn"${totalCount <= 20 ? ' disabled' : ''}>Next &raquo;</button>
 </div>
 
 ${htmlFooter()}
@@ -2073,7 +2122,7 @@ export default {
         const nonce = crypto.randomUUID().replace(/-/g, '');
 
         if (path === '/') {
-          return renderHomePage(nonce);
+          return await renderHomePage(nonce, db);
         }
 
         const bountyPageMatch = path.match(/^\/bounties\/([a-f0-9-]+)$/);
