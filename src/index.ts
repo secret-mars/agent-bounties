@@ -226,10 +226,30 @@ function pubkeyToP2SH_P2WPKH(pubkey: Uint8Array): string {
   return base58CheckEncode(0x05, scriptHash);
 }
 
-function deriveAddress(pubkey: Uint8Array, header: number): string {
-  if (header >= 39) return pubkeyToBech32(pubkey);
-  if (header >= 35) return pubkeyToP2SH_P2WPKH(pubkey);
-  return pubkeyToP2PKH(pubkey);
+/**
+ * Determine expected address type from the address string itself.
+ * This avoids relying on the BIP-137 header byte for address-type selection,
+ * which breaks when signers use a compressed-P2PKH header (31–34) for native
+ * SegWit addresses (a common real-world mistake in many signing libraries).
+ */
+function addressType(addr: string): 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh' | 'unknown' {
+  const a = addr.toLowerCase();
+  if (a.startsWith('bc1q') || a.startsWith('tb1q')) return 'p2wpkh';
+  if (a.startsWith('3') || a.startsWith('2')) return 'p2sh-p2wpkh';
+  if (a.startsWith('1') || a.startsWith('m') || a.startsWith('n')) return 'p2pkh';
+  return 'unknown';
+}
+
+/**
+ * Derive all plausible address representations for a recovered public key.
+ * Returns them as lower-case strings so they can be compared directly.
+ */
+function deriveAllAddresses(pubkeyCompressed: Uint8Array): string[] {
+  return [
+    pubkeyToBech32(pubkeyCompressed),
+    pubkeyToP2SH_P2WPKH(pubkeyCompressed),
+    pubkeyToP2PKH(pubkeyCompressed),
+  ].map(a => a.toLowerCase());
 }
 
 async function verifyBip137(signature: string, message: string, expectedAddress: string): Promise<string | null> {
@@ -243,31 +263,74 @@ async function verifyBip137(signature: string, message: string, expectedAddress:
   const header = sigBytes[0];
   if (header < 27 || header > 42) return `Invalid signature header byte: ${header}`;
 
+  // BIP-137 §3: recovery ID is the low 2 bits of (header − 27); compressed
+  // keys start at header 31.  Both P2PKH-compressed (31–34) and P2WPKH (39–42)
+  // headers encode the same recovery bit, so (header − 27) & 3 is always right.
   const recoveryId = (header - 27) & 3;
   const compressed = header >= 31;
 
   const r = sigBytes.slice(1, 33);
   const s = sigBytes.slice(33, 65);
-  const sig = new secp.Signature(
-    BigInt('0x' + Array.from(r, b => b.toString(16).padStart(2, '0')).join('')),
-    BigInt('0x' + Array.from(s, b => b.toString(16).padStart(2, '0')).join(''))
-  ).addRecoveryBit(recoveryId);
+  const rBigInt = BigInt('0x' + Array.from(r, b => b.toString(16).padStart(2, '0')).join(''));
+  const sBigInt = BigInt('0x' + Array.from(s, b => b.toString(16).padStart(2, '0')).join(''));
 
   const msgHash = bitcoinMessageHash(message);
-
-  let pubkey: Uint8Array;
-  try {
-    const point = sig.recoverPublicKey(msgHash);
-    pubkey = point.toRawBytes(compressed);
-  } catch { return 'Signature recovery failed: invalid signature for this message'; }
-
-  const derivedAddress = deriveAddress(pubkey, header).toLowerCase();
   const expectedAddressNorm = expectedAddress.toLowerCase();
-  if (derivedAddress !== expectedAddressNorm) {
-    return `Signature mismatch: recovered ${derivedAddress}, expected ${expectedAddressNorm}`;
+  const expType = addressType(expectedAddressNorm);
+
+  // Collect all (recoveryId, compressed) combinations to try.
+  // Primary attempt uses the header-derived values; fallback tries the
+  // alternate recovery bit so that signatures produced with the wrong header
+  // byte (e.g. a P2PKH-compressed header for a bc1q address) still verify.
+  const attempts: Array<{ rid: number; comp: boolean }> = [
+    { rid: recoveryId, comp: compressed },
+    { rid: recoveryId ^ 1, comp: compressed },   // alternate recovery bit
+    { rid: recoveryId, comp: !compressed },       // alternate compression flag
+    { rid: recoveryId ^ 1, comp: !compressed },
+  ];
+
+  for (const { rid, comp } of attempts) {
+    // Recover the public key point; toRawBytes(true) always gives compressed form.
+    // Compressed form is required for P2WPKH and P2SH-P2WPKH address derivation.
+    // For P2PKH we may need the uncompressed form, captured separately below.
+    let compressedPubkey: Uint8Array;
+    let uncompressedPubkey: Uint8Array | null = null;
+    try {
+      const point = new secp.Signature(rBigInt, sBigInt).addRecoveryBit(rid).recoverPublicKey(msgHash);
+      compressedPubkey = point.toRawBytes(true);
+      if (!comp) uncompressedPubkey = point.toRawBytes(false);
+    } catch { continue; }
+
+    // Derive the correct address type from the expectedAddress prefix so that
+    // signatures produced with a mismatched header byte (e.g. a P2PKH-compressed
+    // header 31–34 for a native SegWit bc1q address) are still accepted when the
+    // recovered public key genuinely corresponds to the expected address.
+    let derivedAddress: string;
+    if (expType === 'p2wpkh') {
+      derivedAddress = pubkeyToBech32(compressedPubkey).toLowerCase();
+    } else if (expType === 'p2sh-p2wpkh') {
+      derivedAddress = pubkeyToP2SH_P2WPKH(compressedPubkey).toLowerCase();
+    } else {
+      // For legacy P2PKH, respect the compression flag from the header byte since
+      // the address encodes whether the key is compressed or uncompressed.
+      const pkForP2PKH = comp ? compressedPubkey : (uncompressedPubkey ?? compressedPubkey);
+      derivedAddress = pubkeyToP2PKH(pkForP2PKH).toLowerCase();
+    }
+
+    if (derivedAddress === expectedAddressNorm) return null;
   }
 
-  return null;
+  // All attempts failed — build a diagnostic showing what we actually recovered
+  // with the header-specified parameters so the error message is actionable.
+  let diagnosticAddr = '(recovery failed)';
+  try {
+    const diagSig = new secp.Signature(rBigInt, sBigInt).addRecoveryBit(recoveryId);
+    const diagPubkey = diagSig.recoverPublicKey(msgHash).toRawBytes(true);
+    const addrs = deriveAllAddresses(diagPubkey);
+    diagnosticAddr = addrs[0]; // show bech32 as the primary diagnostic
+  } catch { /* leave as (recovery failed) */ }
+
+  return `Signature mismatch: recovered ${diagnosticAddr}, expected ${expectedAddressNorm}`;
 }
 
 // ─── BIP-322 Signature Verification (P2WPKH / bc1q) ─────────────────────────
