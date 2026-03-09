@@ -320,9 +320,22 @@ function parseDERSignature(der: Uint8Array): Uint8Array {
 }
 
 /**
- * BIP-322 tagged hash: SHA256(SHA256(tag) || SHA256(tag) || varint(msg.len) || msg)
+ * BIP-322 tagged hash (spec-compliant): SHA256(SHA256(tag) || SHA256(tag) || msg)
+ * No varint length prefix — matches the BIP-322 reference implementation and MCP v1.33.1+.
  */
 function bip322TaggedHash(message: string): Uint8Array {
+  const tagHash = sha256(new TextEncoder().encode('BIP0322-signed-message'));
+  const msgBytes = new TextEncoder().encode(message);
+  return sha256(concatBytes(tagHash, tagHash, msgBytes));
+}
+
+/**
+ * BIP-322 tagged hash (legacy/non-standard): SHA256(SHA256(tag) || SHA256(tag) || varint(msg.len) || msg)
+ * Incorrectly prepends a varint length prefix. Kept for backward compatibility with agents
+ * that signed using MCP v1.28.x and earlier.
+ * @deprecated — new signers use bip322TaggedHash (spec-compliant)
+ */
+function bip322TaggedHashLegacy(message: string): Uint8Array {
   const tagHash = sha256(new TextEncoder().encode('BIP0322-signed-message'));
   const msgBytes = new TextEncoder().encode(message);
   const varint = encodeVarInt(msgBytes.length);
@@ -332,9 +345,10 @@ function bip322TaggedHash(message: string): Uint8Array {
 /**
  * Build BIP-322 to_spend virtual transaction and return its txid.
  * Uses RawTx.encode() from @scure/btc-signer for correct serialization.
+ * Pass useLegacyHash=true to use the non-standard varint-prepend hash (MCP v1.28.x and earlier).
  */
-function bip322BuildToSpendTxId(message: string, scriptPubKey: Uint8Array): Uint8Array {
-  const msgHash = bip322TaggedHash(message);
+function bip322BuildToSpendTxId(message: string, scriptPubKey: Uint8Array, useLegacyHash = false): Uint8Array {
+  const msgHash = useLegacyHash ? bip322TaggedHashLegacy(message) : bip322TaggedHash(message);
   const scriptSig = concatBytes(new Uint8Array([0x00, 0x20]), msgHash);
 
   const rawTx = RawTx.encode({
@@ -384,32 +398,31 @@ async function verifyBip322P2WPKH(signatureB64: string, message: string, expecte
     return `BIP-322 pubkey mismatch: derived ${derivedAddress}, expected ${expectedAddress}`;
   }
 
-  // Build to_spend txid
-  const toSpendTxid = bip322BuildToSpendTxId(message, scriptPubKey);
-
-  // Build (unsigned) to_sign transaction for sighash computation
-  const toSignTx = new Transaction({ version: 0, lockTime: 0, allowUnknownOutputs: true });
-  toSignTx.addInput({
-    txid: toSpendTxid,
-    index: 0,
-    sequence: 0,
-    witnessUtxo: { amount: BigInt(0), script: scriptPubKey },
-  });
-  toSignTx.addOutput({ script: Script.encode(['RETURN']), amount: BigInt(0) });
-
-  // Compute BIP143 witness-v0 sighash using btc-signer
-  const scriptCode = p2pkh(pubkeyBytes).script;
-  const sighash = toSignTx.preimageWitnessV0(0, scriptCode, SigHash.ALL, BigInt(0));
-
   // Strip hashtype byte, convert DER to compact format
   const derSig = ecdsaSigWithHashtype.slice(0, -1);
   const compactSig = parseDERSignature(derSig);
 
-  // Verify ECDSA using @noble/curves (matches btc-signer internals)
-  const valid = secp256k1.verify(compactSig, sighash, pubkeyBytes, { prehash: false });
-  if (!valid) return 'BIP-322 ECDSA verification failed';
+  // scriptCode for P2WPKH: OP_DUP OP_HASH160 <hash160(pubkey)> OP_EQUALVERIFY OP_CHECKSIG
+  const scriptCode = p2pkh(pubkeyBytes).script;
 
-  return null; // verified
+  // Helper: compute BIP143 sighash and verify ECDSA for a given to_spend txid.
+  const verifySighash = (txid: Uint8Array): boolean => {
+    const tx = new Transaction({ version: 0, lockTime: 0, allowUnknownOutputs: true });
+    tx.addInput({ txid, index: 0, sequence: 0, witnessUtxo: { amount: BigInt(0), script: scriptPubKey } });
+    tx.addOutput({ script: Script.encode(['RETURN']), amount: BigInt(0) });
+    const sighash = tx.preimageWitnessV0(0, scriptCode, SigHash.ALL, BigInt(0));
+    return secp256k1.verify(compactSig, sighash, pubkeyBytes, { prehash: false });
+  };
+
+  // Try spec-compliant hash first (BIP-322: no varint prefix) — matches MCP v1.33.1+.
+  const toSpendTxid = bip322BuildToSpendTxId(message, scriptPubKey);
+  if (verifySighash(toSpendTxid)) return null;
+
+  // Fall back to legacy tagged hash (varint-prepend) for agents using MCP v1.28.x and earlier.
+  const toSpendTxidLegacy = bip322BuildToSpendTxId(message, scriptPubKey, true);
+  if (verifySighash(toSpendTxidLegacy)) return null;
+
+  return 'BIP-322 ECDSA verification failed';
 }
 
 // ─── Unified Signature Verification ──────────────────────────────────────────
