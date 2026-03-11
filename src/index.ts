@@ -282,12 +282,6 @@ function concatBytes(...arrays: Uint8Array[]): Uint8Array {
   return result;
 }
 
-function encodeVarInt(n: number): Uint8Array {
-  if (n < 0xfd) return new Uint8Array([n]);
-  if (n <= 0xffff) return new Uint8Array([0xfd, n & 0xff, (n >> 8) & 0xff]);
-  return new Uint8Array([0xfe, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]);
-}
-
 function doubleSha256(data: Uint8Array): Uint8Array {
   return sha256(sha256(data));
 }
@@ -320,13 +314,18 @@ function parseDERSignature(der: Uint8Array): Uint8Array {
 }
 
 /**
- * BIP-322 tagged hash: SHA256(SHA256(tag) || SHA256(tag) || varint(msg.len) || msg)
+ * BIP-322 tagged hash: SHA256(SHA256(tag) || SHA256(tag) || msg)
+ * where tag = "BIP0322-signed-message"
+ *
+ * Per the BIP-322 spec, message bytes are concatenated directly — there is no
+ * varint length prefix before the message. The tagged-hash construction is:
+ *   tagged_hash(tag, msg) = SHA256(SHA256(tag) || SHA256(tag) || msg)
+ * The varint is a Bitcoin script/wire encoding convention and does NOT apply here.
  */
 function bip322TaggedHash(message: string): Uint8Array {
   const tagHash = sha256(new TextEncoder().encode('BIP0322-signed-message'));
   const msgBytes = new TextEncoder().encode(message);
-  const varint = encodeVarInt(msgBytes.length);
-  return sha256(concatBytes(tagHash, tagHash, varint, msgBytes));
+  return sha256(concatBytes(tagHash, tagHash, msgBytes));
 }
 
 /**
