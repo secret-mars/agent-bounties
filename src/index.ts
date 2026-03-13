@@ -539,46 +539,45 @@ async function verifyAibtcAgent(db: D1Database, stxAddress: string): Promise<Aib
   }
 
   // Call AIBTC API
-  try {
-    const resp = await fetch(`https://aibtc.com/api/verify/${stxAddress}`);
-    if (!resp.ok) return null;
-
-    const data = await resp.json() as {
-      registered?: boolean;
-      level?: number;
-      agent?: {
-        stxAddress?: string;
-        btcAddress?: string;
-        displayName?: string;
-        bnsName?: string;
-      };
-    };
-
-    if (!data.registered) return null;
-
-    const level = data.level ?? 0;
-    const agent = data.agent;
-    const display_name = agent?.displayName || agent?.bnsName || null;
-    const btc_address = agent?.btcAddress || null;
-
-    // Cache the result
-    await db
-      .prepare(
-        `INSERT INTO aibtc_cache (stx_address, level, display_name, btc_address, verified_at)
-         VALUES (?, ?, ?, ?, datetime('now'))
-         ON CONFLICT(stx_address) DO UPDATE SET
-           level = excluded.level,
-           display_name = excluded.display_name,
-           btc_address = excluded.btc_address,
-           verified_at = excluded.verified_at`
-      )
-      .bind(stxAddress, level, display_name, btc_address)
-      .run();
-
-    return { level, display_name, btc_address };
-  } catch {
-    return null;
+  const resp = await fetch(`https://aibtc.com/api/verify/${stxAddress}`);
+  if (!resp.ok) {
+    if (resp.status === 404) return null; // genuinely not registered
+    throw new Error(`AIBTC API error: ${resp.status} ${await resp.text()}`);
   }
+
+  const data = await resp.json() as {
+    registered?: boolean;
+    level?: number;
+    agent?: {
+      stxAddress?: string;
+      btcAddress?: string;
+      displayName?: string;
+      bnsName?: string;
+    };
+  };
+
+  if (!data.registered) return null;
+
+  const level = data.level ?? 0;
+  const agent = data.agent;
+  const display_name = agent?.displayName || agent?.bnsName || null;
+  const btc_address = agent?.btcAddress || null;
+
+  // Cache the result
+  await db
+    .prepare(
+      `INSERT INTO aibtc_cache (stx_address, level, display_name, btc_address, verified_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(stx_address) DO UPDATE SET
+         level = excluded.level,
+         display_name = excluded.display_name,
+         btc_address = excluded.btc_address,
+         verified_at = excluded.verified_at`
+    )
+    .bind(stxAddress, level, display_name, btc_address)
+    .run();
+
+  return { level, display_name, btc_address };
 }
 
 // ─── On-Chain Payment Verification (sBTC via Hiro API) ───────────────────────
@@ -2157,7 +2156,7 @@ export default {
       return json({ error: 'Not found' }, 404, corsOrigin);
     } catch (err: any) {
       console.error('Unhandled error:', err);
-      return json({ error: 'Internal server error' }, 500, corsOrigin ?? '*');
+      return json({ error: err instanceof Error ? err.message : String(err) }, 500, corsOrigin ?? '*');
     }
   },
 
