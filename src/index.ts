@@ -78,7 +78,7 @@ function isValidBtcAddress(addr: string): boolean {
 }
 
 function isValidStxAddress(addr: string): boolean {
-  return /^(SP|SM)[A-Z0-9]{38}$/.test(addr);
+  return /^(SP|SM)[A-Z0-9]+$/.test(addr) && addr.length >= 38 && addr.length <= 42;
 }
 
 function isValidTxHash(hash: string): boolean {
