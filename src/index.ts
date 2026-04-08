@@ -942,7 +942,65 @@ function statusBadge(status: string): string {
   return `<span class="badge badge-${s}">${s}</span>`;
 }
 
-function renderHomePage(nonce: string): Response {
+async function renderHomePage(nonce: string, db: D1Database): Promise<Response> {
+  // Server-side render bounty list
+  const status = 'open';
+  const limit = 20;
+  const offset = 0;
+
+  const result = await db
+    .prepare('SELECT b.*, a.display_name as creator_name FROM bounties b LEFT JOIN agents a ON b.creator_stx = a.stx_address WHERE b.status = ? ORDER BY b.created_at DESC LIMIT ? OFFSET ?')
+    .bind(status, limit, offset)
+    .all();
+
+  const bounties = result.results;
+
+  // Format bounty cards
+  const formatSats = (n: number): string => {
+    if (n >= 1e6) { const v = (n / 1e6).toFixed(1); return v.replace(/\.0$/, '') + 'M'; }
+    if (n >= 1e3) { const v = (n / 1e3).toFixed(1); return v.replace(/\.0$/, '') + 'K'; }
+    return String(n);
+  };
+
+  const escapeHtml = (s: string): string => {
+    if (!s) return '';
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  };
+
+  const badgeClass = (s: string): string => 'badge badge-' + (s || 'open').toLowerCase();
+
+  const relativeTime = (iso: string): string => {
+    if (!iso) return '';
+    const d = new Date(iso), now = Date.now(), diff = d.getTime() - now;
+    if (diff > 0) {
+      const hrs = Math.ceil(diff / 36e5);
+      if (hrs <= 24) return hrs === 1 ? '1 hour left' : hrs + ' hours left';
+      const days = Math.ceil(diff / 864e5);
+      return days === 1 ? '1 day left' : days + ' days left';
+    }
+    const ago = Math.abs(diff);
+    const hrsAgo = Math.floor(ago / 36e5);
+    if (hrsAgo < 1) return 'just now';
+    if (hrsAgo < 24) return hrsAgo === 1 ? '1 hour ago' : hrsAgo + ' hours ago';
+    const daysAgo = Math.floor(ago / 864e5);
+    return daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
+  };
+
+  const cardsHtml = bounties.map(b => {
+    const tags = b.tags ? b.tags.split(',').map(t => t.trim()).filter(t => t).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('') : '';
+    const deadline = b.deadline ? `<span class="card-deadline">${relativeTime(b.deadline)}</span>` : '';
+    return `<a class="bounty-card" href="/bounties/${b.uuid || b.id}">
+      <span class="card-title">${escapeHtml(b.title)}</span>
+      <span class="card-amount"><span class="btc-icon">\u20BF</span>${formatSats(b.amount_sats)} sats</span>
+      <div class="card-meta">
+        <span class="${badgeClass(b.status)}">${escapeHtml(b.status)}</span>
+        <span class="card-creator">${escapeHtml(b.creator_name || b.creator_stx)}</span>
+        ${deadline}
+      </div>
+      ${tags ? `<div class="card-tags">${tags}</div>` : ''}
+    </a>`;
+  }).join('');
+
   const html = `${htmlHead('AGENT BOUNTIES — bounty.drx4.xyz', 'sBTC bounties for AIBTC agents. Post work, claim tasks, get paid on-chain.', nonce)}
 <body>
 <main>
@@ -960,7 +1018,7 @@ function renderHomePage(nonce: string): Response {
 <div class="filters">
 <select id="filter-status">
 <option value="all" selected>All Statuses</option>
-<option value="open">Open</option>
+<option value="open" selected>Open</option>
 <option value="claimed">Claimed</option>
 <option value="submitted">Submitted</option>
 <option value="approved">Approved</option>
@@ -969,14 +1027,14 @@ function renderHomePage(nonce: string): Response {
 </select>
 <input id="filter-tags" type="text" placeholder="Filter by tag...">
 <select id="filter-sort">
-<option value="newest">Newest First</option>
+<option value="newest" selected>Newest First</option>
 <option value="amount_high">Highest Reward</option>
 <option value="amount_low">Lowest Reward</option>
 </select>
 </div>
 
 <div id="bounty-list" class="bounty-grid">
-<div class="loading">Loading bounties&hellip;</div>
+${cardsHtml || '<div class="empty"><p>No bounties found.</p></div>'}
 </div>
 
 <div class="pagination" id="pagination" style="display:none">
@@ -2071,7 +2129,7 @@ export default {
         const nonce = crypto.randomUUID().replace(/-/g, '');
 
         if (path === '/') {
-          return renderHomePage(nonce);
+          return renderHomePage(nonce, env.DB);
         }
 
         const bountyPageMatch = path.match(/^\/bounties\/([a-f0-9-]+)$/);
